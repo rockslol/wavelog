@@ -1,0 +1,75 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Wavelog",
+  "version": "0.2.0",
+  "identifier": "local.spotifystats.widget",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "stats",
+        "title": "Wavelog",
+        "width": 1100,
+        "height": 760,
+        "center": true,
+        "minWidth": 640,
+        "minHeight": 480,
+        "visible": false,
+        "focus": false,
+        "theme": "Dark",
+        "backgroundColor": "#000000",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --renderer-process-limit=1"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8721; img-src 'self' data: https://i.scdn.co https://media.valorant-api.com http://127.0.0.1:8721; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/wavelog-logger"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp",
+        "installerHooks": "installer/hooks.nsh"
+      }
+    },
+    "publisher": "rockslol",
+    "homepage": "https://github.com/rockslol/wavelog",
+    "copyright": "Copyright (c) 2026 rockslol",
+    "category": "Music",
+    "shortDescription": "Your Spotify listening, logged on your PC and turned into stats, widgets and a notch",
+    "longDescription": "Wavelog records everything you play on Spotify and keeps it on your own PC: stats, a Wrapped for any year, liquid-glass desktop widgets and a notch at the top of the screen.",
+    "licenseFile": "../../LICENSE",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCQjIzQ0QyRTFBREM0OEUKUldTT3hLM2gwanl5UzJXZHBiUldzMzBQeCsrNG1uakI3UUk0QjJ3UlRocFU3aU44QThhU0pZYTIK",
+      "endpoints": [
+        "https://github.com/rockslol/wavelog/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

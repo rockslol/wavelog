@@ -1,0 +1,29 @@
+# Your data: listening database, Spotify tokens, settings, logs. Never commit.
+data/
+
+# Python
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+
+# PyInstaller output (the logger exe is built, not committed)
+build/
+dist/
+*.spec
+
+# Node / Vite
+node_modules/
+app/dist/
+
+# Tauri / Rust
+app/src-tauri/target/
+app/src-tauri/gen/
+app/src-tauri/binaries/
+
+# Editors and OS
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store

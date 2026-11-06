@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <body style="margin:0">
+    <div id="root"></div>
+    <script type="module">
+      const q = new URLSearchParams(location.search);
+      const view = q.get("view");
+      const stripes = (w, h) => {
+        const c = new OffscreenCanvas(w, h), g = c.getContext("2d");
+        ["#e8443a", "#f2a33a", "#3a8ee8", "#38c172", "#9b59f0", "#1c1c1c", "#ffffff"].forEach((col, i, a) => {
+          for (let x = i * 14; x < w; x += a.length * 14) { g.fillStyle = col; g.fillRect(x, 0, 14, h); }
+        });
+        const d = g.getImageData(0, 0, w, h).data, out = new Uint8Array(8 + d.length);
+        new DataView(out.buffer).setUint32(0, w, true);
+        new DataView(out.buffer).setUint32(4, h, true);
+        for (let i = 0; i < d.length; i += 4) {
+          const x = (i / 4) % w, y = Math.floor(i / 4 / w), inside = x >= 16 && x < w - 16 && y >= 16 && y < h - 16;
+          out.set(inside ? [0, 0, 0, 0] : [d[i + 2], d[i + 1], d[i], 255], 8 + i);
+        }
+        return out.buffer;
+      };
+      const real = window.fetch;
+      window.fetch = (url, o) => real(q.get("api") ? String(url).replace("127.0.0.1:8721", "127.0.0.1:" + q.get("api")) : url, o).then(async (r) => {
+        if (String(url).endsWith("/valorant")) return real("/valorant-mock.json");
+        if (String(url).endsWith("/valorant/live")) return real("/valorant-live-mock.json");
+        if (String(url).endsWith("/now")) return new Response(JSON.stringify({ color: [0.42, 0.18, 0.26], ...(await r.json()) }));
+        if (!String(url).endsWith("/settings") || o?.method) return r;
+        const s = await r.json(), d = new Date(), day = (n) => new Date(d.getTime() + n * 864e5).toISOString().slice(0, 10);
+        return new Response(JSON.stringify({ ...s, countdowns: [`${day(12)} Christmas trip`, `${day(1)} Dentist`, `${day(40)} Birthday`, `${day(90)} Exams`],
+          todos: [{ text: "Finish history essay", done: false }, { text: "Buy headphones", done: true }, { text: "Call grandma", done: false }, { text: "Clean desk", done: false }],
+          pomodoro: [25, 5], cover_glass: true, note: q.get("note") || "Ranked with Dani at 9\nCharge controller before" }));
+      });
+      if (view) {
+        if (q.get("timer")) localStorage.setItem("timer", JSON.stringify({ mode: "focus", end: Date.now() + 1093000 }));
+        let n = 0, sent = false;
+        window.__TAURI_INTERNALS__ = {
+          metadata: { currentWindow: { label: view }, currentWebview: { label: view, windowLabel: view } },
+          transformCallback: (fn) => ((window["_" + ++n] = fn), n),
+          invoke: async (cmd) => cmd === "backdrop" ? (sent ? new ArrayBuffer(0) : ((sent = true), stripes((innerWidth + 64) >> 1, (innerHeight + 64) >> 1)))
+            : cmd === "plugin:window|is_visible" ? true : cmd === "plugin:event|listen" ? 1 : null,
+        };
+        import("/src/main.jsx");
+      } else if (q.get("one")) {
+        const f = document.createElement("iframe");
+        f.src = `?view=${q.get("one")}${q.get("timer") ? "&timer=1" : ""}`;
+        f.style = `display:block;width:${q.get("w")}px;height:${q.get("h")}px;border:0`;
+        document.body.style.background = "#556";
+        document.getElementById("root").appendChild(f);
+        if (q.get("hover")) setTimeout(() => f.contentDocument.querySelector(".notch")?.dispatchEvent(new MouseEvent("click", { bubbles: true })), 1500);
+      } else if (q.get("pages")) {
+        for (const h of q.get("pages").split(",")) {
+          const f = document.createElement("iframe");
+          f.src = `?view=stats#${h}`;
+          f.style = "display:block;width:1100px;height:1300px;border:0;margin-bottom:8px";
+          document.getElementById("root").appendChild(f);
+        }
+      } else {
+        document.body.style.background = "repeating-linear-gradient(90deg,#e8443a 0 28px,#f2a33a 28px 56px,#3a8ee8 56px 84px,#38c172 84px 112px,#9b59f0 112px 140px,#1c1c1c 140px 168px,#fff 168px 196px)";
+        const sizes = [[192, 192], [372, 192], [372, 372]];
+        for (const v of (q.get("views") || "widget,lyrics,calendar,photos,weather,system").split(",")) {
+          const row = document.createElement("div");
+          row.style = "display:flex;gap:8px;align-items:flex-start;margin-bottom:8px";
+          for (const [w, h] of sizes) {
+            const f = document.createElement("iframe");
+            f.src = `?view=${v}`;
+            f.style = `width:${w}px;height:${h}px;border:0;background:transparent`;
+            f.allowTransparency = true;
+            row.appendChild(f);
+          }
+          document.getElementById("root").appendChild(row);
+        }
+      }
+    </script>
+  </body>
+</html>

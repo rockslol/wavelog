@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "windows": [
+    "*"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-fullscreen",
+    "autostart:default",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}
