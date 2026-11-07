@@ -305,13 +305,16 @@ async def skipped(r: Range = R, year: int = None, limit: int = 10):
 
 @router.get("/search")
 async def search(q_: str = Query(alias="q")):
-    like = f"%{q_.strip()}%"
-    return {"tracks": q(f"SELECT t.id, t.name, {ARTISTS} AS artists, al.image_url AS image, "
+    s = q_.strip()
+    # Names that start with the text first, then names with a word starting with it, then the rest; most played first.
+    rank = "(n LIKE ?2) DESC, (' ' || n LIKE ?3) DESC, plays DESC"
+    args = (f"%{s}%", f"{s}%", f"% {s}%")
+    return {"tracks": q(f"SELECT * FROM (SELECT t.id, t.name, t.name AS n, {ARTISTS} AS artists, al.image_url AS image, "
                         "(SELECT count(*) FROM plays p WHERE p.track_id = t.id) AS plays FROM tracks t "
-                        "LEFT JOIN albums al ON al.id = t.album_id WHERE t.name LIKE ? ORDER BY plays DESC LIMIT 6", like),
-            "artists": q("SELECT ar.id, ar.name, ar.image_url AS image, (SELECT count(*) FROM plays p JOIN track_artists ta "
-                         "ON ta.track_id = p.track_id WHERE ta.artist_id = ar.id) AS plays FROM artists ar "
-                         "WHERE ar.name LIKE ? ORDER BY plays DESC LIMIT 4", like)}
+                        f"LEFT JOIN albums al ON al.id = t.album_id WHERE t.name LIKE ?1) ORDER BY {rank} LIMIT 6", *args),
+            "artists": q("SELECT * FROM (SELECT ar.id, ar.name, ar.name AS n, ar.image_url AS image, (SELECT count(*) FROM plays p "
+                         "JOIN track_artists ta ON ta.track_id = p.track_id WHERE ta.artist_id = ar.id) AS plays FROM artists ar "
+                         f"WHERE ar.name LIKE ?1) ORDER BY {rank} LIMIT 4", *args)}
 
 
 @router.post("/export")

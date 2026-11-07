@@ -1,6 +1,14 @@
 # Your data: listening database, Spotify tokens, settings, logs. Never commit.
 data/
 
+# Safety nets in case private files end up outside data/
+*.db
+*.db-wal
+*.db-shm
+tokens.json
+.env
+*.key
+
 # Python
 backend/.venv/
 .venv/

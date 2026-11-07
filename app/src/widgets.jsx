@@ -413,7 +413,7 @@ export function Valorant() {
           <div className="title">{tier.name || "Unranked"}</div>
           <div className="sub">{v.current?.rr ?? 0} RR <span className={change >= 0 ? "up" : "down"}>{signed(change)}</span></div>
           {size !== "s" && <div className="bar"><div style={{ width: Math.min(100, v.current?.rr ?? 0) + "%" }} /></div>}
-          {size !== "s" && <div className="results">{v.matches.slice(0, 5).map((m) => <i key={m.id} className={result(m)}>{result(m)}</i>)}</div>}
+          {size !== "s" && <div className="vresults">{v.matches.slice(0, 5).map((m) => <i key={m.id} className={result(m)}>{result(m)}</i>)}</div>}
         </div>
       </div>
       {size === "l" && (

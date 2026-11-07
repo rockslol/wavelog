@@ -220,6 +220,7 @@ fn app_under(notch: HWND, x: i32, y: i32) -> bool {
 
 fn notch_hover(app: &AppHandle) {
     let mut wanted = std::time::Instant::now();
+    let mut edge_at: Option<std::time::Instant> = None;
     loop {
         let win = app.get_webview_window("notch");
         if let Some(w) = &win {
@@ -230,13 +231,18 @@ fn notch_hover(app: &AppHandle) {
             if let (Ok(p), Ok(s), Ok(k), Ok(h), true) = (w.outer_position(), w.outer_size(), w.scale_factor(), w.hwnd(), visible() && w.is_visible().unwrap_or(false)) {
                 let (cx, cy, mid) = (c.x as f64, c.y as f64, p.x as f64 + s.width as f64 / 2.0);
                 inside = (cx - mid).abs() < rw * k / 2.0 && c.y >= p.y && cy < p.y as f64 + rh * k;
-                // Auto-hide: hidden while an app is under the notch's spot, back when the mouse comes close.
+                // Auto-hide: hidden while an app is under the notch's spot. Coming close isn't enough to bring it
+                // back, or it would pop up over browser tabs right when you click them. Instead, rest the mouse on
+                // the top edge of the screen for a moment; once it's out it stays while the mouse is on it.
                 if NOTCH_AUTOHIDE.load(Relaxed) {
-                    let near = (cx - mid).abs() < (rw.max(250.0) / 2.0 + 40.0) * k && c.y >= p.y - 2 && cy < p.y as f64 + (rh.max(34.0) + 30.0) * k;
-                    if near || inside || !app_under(h.0 as HWND, mid as i32, p.y + 2) {
+                    let over_app = app_under(h.0 as HWND, mid as i32, p.y + 2);
+                    let edge = (cx - mid).abs() < (rw.max(200.0) / 2.0 + 30.0) * k && c.y >= p.y - 2 && c.y <= p.y + 1;
+                    edge_at = if edge { edge_at.or(Some(std::time::Instant::now())) } else { None };
+                    let held = edge_at.is_some_and(|t| t.elapsed() >= Duration::from_millis(300));
+                    if !over_app || held || (inside && NOTCH_SHOWN.load(Relaxed)) {
                         wanted = std::time::Instant::now();
                     }
-                    show = wanted.elapsed() < Duration::from_millis(500);
+                    show = wanted.elapsed() < Duration::from_millis(350);
                 }
             }
             inside &= show;

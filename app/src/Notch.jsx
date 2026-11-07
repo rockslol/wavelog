@@ -261,8 +261,8 @@ export default function Notch() {
   const lines = ly.synced ? [ly.i - 1, ly.i, ly.i + 1].map((i) => (i >= 0 && ly.lines[i]) || null) : [];
   const accent = o.accent === "green" ? "#1ed760" : o.accent === "white" ? "#fff" : tint(now?.color);
   const style = { width: w, height: h, borderRadius: `0 0 ${r}px ${r}px`, "--eq": accent, "--glow": playing && o.glow ? tint(now.color, 0.5) : "transparent" };
-  const meter = (label, v, extra) => v != null && (
-    <div className="n-meter"><span>{label}</span><div className="n-bar"><div className={v > 85 ? "hot" : ""} style={{ width: v + "%" }} /></div><b>{Math.round(v)}%{extra}</b></div>
+  const meter = (label, v) => v != null && (
+    <div className="n-meter"><span>{label}</span><div className="n-bar"><div className={v > 85 ? "hot" : ""} style={{ width: v + "%" }} /></div><b>{Math.round(v)}%</b></div>
   );
 
   const parts = {
@@ -348,9 +348,9 @@ export default function Notch() {
     ),
     pc: pc && (
       <div key="pc" className="n-tile n-pc">
-        <div className="n-th"><Icon d="chip" />PC</div>
+        <div className="n-th"><Icon d="chip" />PC{pc.gpu_temp != null && <em>GPU {pc.gpu_temp}°</em>}</div>
         {meter("CPU", pc.cpu)}
-        {meter("GPU", pc.gpu, pc.gpu_temp != null && <i> · {pc.gpu_temp}°</i>)}
+        {meter("GPU", pc.gpu)}
         {meter("RAM", pc.ram)}
       </div>
     ),

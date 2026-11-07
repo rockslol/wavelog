@@ -434,27 +434,54 @@ function Search() {
     return () => (removeEventListener("resize", place), removeEventListener("pointerdown", away));
   }, [r]);
   const items = r ? [...r.artists.map((x) => ["artist", x]), ...r.tracks.map((x) => ["track", x])] : [];
+  const [sel, setSel] = useState(0);
+  useEffect(() => setSel(0), [r]);
+  useEffect(() => panel.current?.querySelector(".sr-item.on")?.scrollIntoView({ block: "nearest" }), [sel]);
   const pick = ([kind, x]) => (setQ(""), open({ kind, id: x.id }));
+  const key = (e) => {
+    if (e.key === "Escape") setQ("");
+    else if (e.key === "Enter" && items[sel]) pick(items[sel]);
+    else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length) {
+      e.preventDefault();
+      setSel((i) => (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+    }
+  };
+  const row = (it, i) => (
+    <button key={it[0] + it[1].id} className={"sr-item" + (i === sel ? " on" : "")} onClick={() => pick(it)} onPointerEnter={() => setSel(i)}>
+      <Img src={it[1].image} round={it[0] === "artist"} />
+      <span className="sr-text">
+        <b><Mark text={it[1].name} q={q.trim()} /></b>
+        <small>{it[0] === "artist" ? "Artist" : it[1].artists}</small>
+      </span>
+      <span className="sr-plays">{fmt(it[1].plays)}<small>plays</small></span>
+    </button>
+  );
+  const nA = r?.artists.length || 0;
   return (
     <div className="search">
-      <input ref={input} className="glass" value={q} placeholder="Search" onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => (e.key === "Escape" ? setQ("") : e.key === "Enter" && items[0] && pick(items[0]))} />
+      <input ref={input} className="glass" value={q} placeholder="Search" onChange={(e) => setQ(e.target.value)} onKeyDown={key} />
       {r && at && createPortal(
-        <div className="results floating" ref={panel} style={at}>
-          {items.length ? items.map((it) => (
-            <button key={it[0] + it[1].id} className="clickable" onClick={() => pick(it)}>
-              <Img src={it[1].image} round={it[0] === "artist"} />
-              <div className="meta">
-                <div className="name">{it[1].name}</div>
-                <div className="sub">{it[0] === "artist" ? "Artist" : it[1].artists} · {fmt(it[1].plays)} plays</div>
-              </div>
-            </button>
-          )) : <p className="none">No matches for "{q.trim()}"</p>}
+        <div className="sr" ref={panel} style={at}>
+          {items.length ? (
+            <>
+              {nA > 0 && <div className="sr-head">Artists</div>}
+              {items.slice(0, nA).map((it, i) => row(it, i))}
+              {r.tracks.length > 0 && <div className="sr-head">Songs</div>}
+              {items.slice(nA).map((it, i) => row(it, nA + i))}
+            </>
+          ) : <p className="sr-none">Nothing called "{q.trim()}" in your plays</p>}
         </div>,
         document.body,
       )}
     </div>
   );
+}
+
+// Highlights the part of a name that matches the search.
+function Mark({ text, q }) {
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return text;
+  return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
 const Status = ({ error }) => <div className="status">{error ? "Can't reach the logger at 127.0.0.1:8721. Is it running?" : "Loading"}</div>;
@@ -1059,8 +1086,8 @@ export const Row = ({ label, hint, children }) => (
   </div>
 );
 
-const lfProgress = (l) => (l.phase === "Matching songs to Spotify"
-  ? `${fmt(l.done)} of ${fmt(l.total)} scrobbles · ${fmt(l.added)} added, ${fmt(l.known)} already here`
+const lfProgress = (l) => (l.phase === "Matching songs to Spotify" ? `${fmt(l.done)} of ${fmt(l.total)} songs`
+  : l.phase === "Adding plays" ? `${fmt(l.done)} of ${fmt(l.total)} scrobbles · ${fmt(l.added)} added, ${fmt(l.known)} already here`
   : `${fmt(l.done)} of ${fmt(l.total)} scrobbles read`);
 const lfDone = (l) => (l.last_run
   ? `Last synced ${new Date(l.last_run * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}${l.missing_songs ? ` · ${fmt(l.missing_songs)} songs not found on Spotify` : ""}`
@@ -1162,7 +1189,7 @@ function Settings({ tab, setTab }) {
               value={mons.some((m) => m[0] === n.monitor && !m[1]) ? n.monitor : ""} onChange={(v) => setN({ monitor: v })} />
           </Row>
         )}
-        <Row label="Hide over apps" hint="Hidden while a window is under it. Move the mouse to the top centre to bring it back">{nSwitch("autohide")}</Row>
+        <Row label="Hide over apps" hint="Hidden while a window is under it, so it never covers tabs or buttons. Rest the mouse on the top edge of the screen to bring it back">{nSwitch("autohide")}</Row>
         <Row label="Lyrics line" hint="The current lyric replaces the song name">{nSwitch("lyrics")}</Row>
         <Row label="Alerts" hint="Focus timer, events starting soon and match results">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>

@@ -81,20 +81,40 @@ def same_artist(lastfm, names):
 
 
 def local_index():
-    """norm(track name) -> [(norm(artist), track id)], most played first."""
+    """norm(track name) -> [(artist, track id)], most played first."""
     idx = defaultdict(list)
     rows = db.execute("SELECT t.id, t.name, ar.name FROM tracks t JOIN track_artists ta ON ta.track_id = t.id "
                       "JOIN artists ar ON ar.id = ta.artist_id "
-                      "ORDER BY (SELECT count(*) FROM plays p WHERE p.track_id = t.id) DESC")
+                      "LEFT JOIN (SELECT track_id, count(*) n FROM plays GROUP BY track_id) c ON c.track_id = t.id "
+                      "ORDER BY c.n DESC")
     for tid, name, artist in rows:
         idx[norm(name)].append((artist, tid))
     return idx
+
+
+class Pace:
+    """Spaces requests out to at most `rate` a second, shared by all workers."""
+
+    def __init__(self, rate):
+        self.gap, self.next, self.lock = 1 / rate, 0.0, asyncio.Lock()
+
+    async def wait(self):
+        async with self.lock:
+            now = time.monotonic()
+            at = max(now, self.next)
+            self.next = at + self.gap
+        await asyncio.sleep(at - now)
+
+
+lastfm_pace = Pace(5)  # Last.fm asks for at most 5 requests a second
+spotify_pace = Pace(8)
 
 
 async def search(name, artist):
     global search_limit
     clean = lambda s: re.sub(r"[\"':]", " ", s)
     for q in (f"track:{clean(name)} artist:{clean(artist)}", f"{clean(name)} {clean(artist)}"):
+        await spotify_pace.wait()
         try:
             d = await spotify.get("/search", q=q, type="track", limit=search_limit)
         except httpx.HTTPStatusError as e:
@@ -113,46 +133,100 @@ async def search(name, artist):
     return None
 
 
-async def resolve(artist, name, idx):
-    row = db.execute("SELECT track_id FROM lastfm_map WHERE artist=? AND track=?", (artist, name)).fetchone()
-    if row:
-        return row[0] or None
-    tid = next((t for a, t in idx.get(norm(name), []) if same_artist(artist, [a])), None)
-    if not tid:
-        t = await search(name, artist)
-        if t:
-            save_track(t)
-            tid = t["id"]
-        await asyncio.sleep(0.3)
-    db.execute("INSERT OR REPLACE INTO lastfm_map VALUES (?,?,?)", (artist, name, tid or ""))
-    return tid
-
-
-def insert(tid, name, times, used):
-    dur = (db.execute("SELECT duration_ms FROM tracks WHERE id=?", (tid,)).fetchone() or [None])[0] or 180000
-    n = norm(name)
+def write_map(rows):
+    if not rows:
+        return
     db.execute("BEGIN")
     try:
-        for start in sorted(times):
-            end = start + dur / 1000  # scrobbles carry the start time, plays store the end time
-            near = db.execute(
-                "SELECT p.id, p.track_id, t.name FROM plays p LEFT JOIN tracks t ON t.id = p.track_id "
-                "WHERE p.played_at BETWEEN ? AND ? ORDER BY abs(unixepoch(p.played_at) - ?)",
-                (ts(start - 60), ts(end + 90), end)).fetchall()
-            hit = next((pid for pid, ptid, pname in near if pid not in used and (ptid == tid or norm(pname) == n)), None)
-            if hit:
-                used.add(hit)
-                state["known"] += 1
-                continue
-            c = db.execute("INSERT OR IGNORE INTO plays (track_id, played_at, ms_played, source) VALUES (?,?,?,'lastfm')",
-                           (tid, ts(end), dur))
-            if c.rowcount:
-                used.add(c.lastrowid)
-                state["added"] += 1
+        db.executemany("INSERT OR REPLACE INTO lastfm_map VALUES (?,?,?)", rows)
         db.execute("COMMIT")
-    except Exception:
+    except BaseException:
         db.execute("ROLLBACK")
         raise
+    rows.clear()
+
+
+async def match(groups):
+    """(artist, name) -> track id or None. Cache and local db first, then Spotify search for the rest, 8 at a time."""
+    cache = {(a, t): tid or None for a, t, tid in db.execute("SELECT artist, track, track_id FROM lastfm_map")}
+    idx, found, todo, new = local_index(), {}, [], []
+    for key in groups:
+        artist, name = key
+        if key in cache:
+            found[key] = cache[key]
+        elif tid := next((t for a, t in idx.get(norm(name), []) if same_artist(artist, [a])), None):
+            found[key] = tid
+            new.append((artist, name, tid))
+        else:
+            todo.append(key)
+            continue
+        state["done"] += 1
+    write_map(new)
+    todo.sort(key=lambda k: len(groups[k]))  # most played last, so pop() takes them first
+
+    async def worker():
+        while todo:
+            artist, name = key = todo.pop()
+            t = await search(name, artist)
+            if t:
+                save_track(t)
+            found[key] = t["id"] if t else None
+            new.append((artist, name, found[key] or ""))
+            if len(new) >= 100:
+                write_map(new)
+            state["done"] += 1
+
+    try:
+        await asyncio.gather(*(worker() for _ in range(8)))
+    finally:
+        write_map(new)  # keep what was found even if the import stops
+    return found
+
+
+def insert(tid, name, times, used, dur):
+    n = norm(name)
+    for start in sorted(times):
+        end = start + dur / 1000  # scrobbles carry the start time, plays store the end time
+        near = db.execute(
+            "SELECT p.id, p.track_id, t.name FROM plays p LEFT JOIN tracks t ON t.id = p.track_id "
+            "WHERE p.played_at BETWEEN ? AND ? ORDER BY abs(unixepoch(p.played_at) - ?)",
+            (ts(start - 60), ts(end + 90), end)).fetchall()
+        hit = next((pid for pid, ptid, pname in near if pid not in used and (ptid == tid or norm(pname) == n)), None)
+        if hit:
+            used.add(hit)
+            state["known"] += 1
+            continue
+        c = db.execute("INSERT OR IGNORE INTO plays (track_id, played_at, ms_played, source) VALUES (?,?,?,'lastfm')",
+                       (tid, ts(end), dur))
+        if c.rowcount:
+            used.add(c.lastrowid)
+            state["added"] += 1
+
+
+async def read_scrobbles(user, key, since, until):
+    """Every scrobble between since and until as (start, artist, name). Reads 5 pages at a time."""
+    params = {"limit": 200, "to": until, **({"from": since} if since else {})}
+
+    async def page(n):
+        await lastfm_pace.wait()
+        rt = (await call("user.getrecenttracks", user, key, page=n, **params))["recenttracks"]
+        items = rt.get("track") or []
+        out = [(int(t["date"]["uts"]), t["artist"]["#text"], t["name"])
+               for t in (items if isinstance(items, list) else [items])
+               if "date" in t and not (t.get("@attr") or {}).get("nowplaying")]
+        state["done"] += len(out)
+        return rt, out
+
+    rt, scrobbles = await page(1)
+    pages, state["total"] = int(rt["@attr"]["totalPages"] or 0), int(rt["@attr"]["total"] or 0)
+    todo = list(range(pages, 1, -1))
+
+    async def worker():
+        while todo:
+            scrobbles.extend((await page(todo.pop()))[1])
+
+    await asyncio.gather(*(worker() for _ in range(5)))
+    return scrobbles
 
 
 async def sync(full=False):
@@ -170,37 +244,41 @@ async def sync(full=False):
     state.update(running=True, phase="Reading your scrobbles", done=0, total=0, songs=0, added=0, known=0, unmatched=0,
                  error=None, full=full, started=time.time())
     try:
-        scrobbles, page, pages = [], 1, 1
-        while page <= pages:
-            j = await call("user.getrecenttracks", user, key, limit=200, page=page, to=until, **({"from": since} if since else {}))
-            rt = j["recenttracks"]
-            pages, state["total"] = int(rt["@attr"]["totalPages"] or 0), int(rt["@attr"]["total"] or 0)
-            items = rt.get("track") or []
-            for t in items if isinstance(items, list) else [items]:
-                if "date" in t and not (t.get("@attr") or {}).get("nowplaying"):
-                    scrobbles.append((int(t["date"]["uts"]), t["artist"]["#text"], t["name"]))
-            state["done"] = len(scrobbles)
-            page += 1
-            await asyncio.sleep(0.25)
-
+        scrobbles = await read_scrobbles(user, key, since, until)
         groups = defaultdict(list)
         for start, artist, name in scrobbles:
             groups[(artist, name)].append(start)
-        state.update(phase="Matching songs to Spotify", done=0, total=len(scrobbles), songs=len(groups))
-        idx, used = local_index(), set()
-        for (artist, name), times in sorted(groups.items(), key=lambda g: -len(g[1])):
-            tid = await resolve(artist, name, idx)
-            if tid:
-                insert(tid, name, times, used)
-            else:
-                state["unmatched"] += len(times)
-            state["done"] += len(times)
+        state.update(phase="Matching songs to Spotify", done=0, total=len(groups), songs=len(groups))
+        found = await match(groups)
+
+        state.update(phase="Adding plays", done=0, total=len(scrobbles))
+        durs = dict(db.execute("SELECT id, duration_ms FROM tracks WHERE duration_ms"))
+        used, batch = set(), 0
+        db.execute("BEGIN")
+        try:
+            for (artist, name), times in groups.items():
+                if tid := found.get((artist, name)):
+                    insert(tid, name, times, used, durs.get(tid) or 180000)
+                else:
+                    state["unmatched"] += len(times)
+                state["done"] += len(times)
+                batch += len(times)
+                if batch >= 3000:  # commit in chunks and let the rest of the logger run in between
+                    db.execute("COMMIT")
+                    await asyncio.sleep(0)
+                    db.execute("BEGIN")
+                    batch = 0
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
         newest = max((s for s, _, _ in scrobbles), default=0)
         kv("lastfm_synced", max(newest, int(kv("lastfm_synced") or 0)))
         kv("lastfm_last_run", int(time.time()))
         state["phase"] = "Done"
-        log.info("Last.fm %s: %s scrobbles, %s added, %s already there, %s not on Spotify", "import" if full else "sync",
-                 len(scrobbles), state["added"], state["known"], state["unmatched"])
+        log.info("Last.fm %s: %s scrobbles, %s added, %s already there, %s not on Spotify, took %.0fs",
+                 "import" if full else "sync", len(scrobbles), state["added"], state["known"], state["unmatched"],
+                 time.time() - state["started"])
     except LastfmError as e:
         state.update(error=str(e), phase="")
     except Exception:
