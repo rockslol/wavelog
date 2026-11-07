@@ -4,7 +4,7 @@ A Windows app that records everything you play on Spotify and turns it into stat
 
 - **Stats window**: overview (minutes, streaks, top tracks/artists/albums, listening by hour and weekday, heatmaps, song of the day, most skipped), a Wrapped for any year, track and artist pages, full-screen karaoke lyrics, gaming time and a Valorant tracker.
 - **Desktop widgets**: now playing, lyrics, calendar, photos, weather, PC monitor, clock, countdown, to-do, note, focus timer, Valorant. Real glass that refracts what's behind it, Small/Medium/Large, snapping, a widget stack.
-- **Notch**: a pill at the top of the screen with the current song, live lyrics, media controls, volume and alerts. Hover it for a dashboard with the clock, weather, focus timer, next event, PC load and to-dos.
+- **Notch**: a pill at the top of the screen with the current song, live lyrics, media controls, Spotify volume and alerts. Hover it for a dashboard with the clock, weather, focus timer, next event, PC load and to-dos.
 - **Imports**: your full Spotify history export, and every Last.fm scrobble.
 - **Private**: no account and no server. Your listening database lives in `%APPDATA%\Wavelog`.
 

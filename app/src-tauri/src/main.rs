@@ -283,6 +283,45 @@ async fn volume(delta: Option<f32>, set: Option<f32>, mute: Option<bool>) -> Opt
     }
 }
 
+/// Spotify's audio sessions: its row in the Windows volume mixer (sometimes more than one).
+fn spotify_sessions() -> Vec<windows::Win32::Media::Audio::ISimpleAudioVolume> {
+    use windows::core::Interface;
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(e) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return vec![] };
+        let Ok(d) = e.GetDefaultAudioEndpoint(eRender, eConsole) else { return vec![] };
+        let Ok(list) = d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None).and_then(|m| m.GetSessionEnumerator()) else { return vec![] };
+        (0..list.GetCount().unwrap_or(0))
+            .filter_map(|i| {
+                let s = list.GetSession(i).ok()?;
+                let pid = s.cast::<IAudioSessionControl2>().ok()?.GetProcessId().ok()?;
+                if exe_name(pid).eq_ignore_ascii_case("spotify.exe") { s.cast::<ISimpleAudioVolume>().ok() } else { None }
+            })
+            .collect()
+    }
+}
+
+/// Spotify's own volume, not the PC's. None when Spotify isn't playing sound on this PC.
+#[tauri::command]
+async fn spotify_volume(delta: Option<f32>, set: Option<f32>, mute: Option<bool>) -> Option<(f32, bool)> {
+    let all = spotify_sessions();
+    let first = all.first()?;
+    unsafe {
+        let now = first.GetMasterVolume().ok()?;
+        for v in &all {
+            if let Some(l) = set.or(delta.map(|d| now + d)) {
+                let _ = v.SetMasterVolume(l.clamp(0.0, 1.0), std::ptr::null());
+                let _ = v.SetMute(false, std::ptr::null());
+            }
+            if let Some(m) = mute {
+                let _ = v.SetMute(m, std::ptr::null());
+            }
+        }
+        Some((first.GetMasterVolume().ok()?, first.GetMute().ok()?.as_bool()))
+    }
+}
+
 fn exe_name(pid: u32) -> String {
     use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::*};
     unsafe {
@@ -737,7 +776,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());

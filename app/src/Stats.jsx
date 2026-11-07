@@ -1204,7 +1204,7 @@ function Settings({ tab, setTab }) {
         <Row label="Lyrics line" hint="The current lyric replaces the song name">{nSwitch("lyrics")}</Row>
         <Row label="Alerts" hint="Focus timer, events starting soon and match results">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
-        <Row label="Volume pop-up" hint="Shows a volume bar when the volume changes">{nSwitch("osd")}</Row>
+        <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
       </section>
       <h4>Look</h4>
       <section className="card group">
@@ -1219,7 +1219,7 @@ function Settings({ tab, setTab }) {
         <Row label="Open with" hint={n.open === "hover" ? "Opens when you rest the mouse on it" : "Opens when you click it"}>
           <Segmented options={[["hover", "Hover"], ["click", "Click"]]} value={n.open} onChange={(v) => setN({ open: v })} />
         </Row>
-        <Row label="Scroll for volume" hint="Scroll on the notch to change the Windows volume">{nSwitch("scroll")}</Row>
+        <Row label="Scroll for volume" hint="Scroll on the notch to change Spotify's volume (not the PC's)">{nSwitch("scroll")}</Row>
       </section>
       <section className="card group notch-order">
         {sections.map((id) => {

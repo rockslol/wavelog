@@ -85,7 +85,8 @@ export default function Notch() {
   const [reveal, setReveal] = useState(true);
   const [peek, setPeek] = useState(false);
   const [osd, setOsd] = useState(0);
-  const [sys, setSys] = useState(null);
+  const [spot, setSpot] = useState(null); // Spotify's own volume (its Windows mixer level): the player slider and scrolling
+  const [osdVol, setOsdVol] = useState(null); // what the volume pop-up shows: PC volume from the volume keys, or Spotify's
   const [live, setLive] = useState(false);
   const [meta, setMeta] = useState(null);
   const [up, setUp] = useState(null);
@@ -122,7 +123,7 @@ export default function Notch() {
   const pos = has ? Math.min(now.duration_ms, now.progress_ms + (now.playing ? ms - now.at : 0)) : 0;
   const ly = useLyrics(has ? now.id : null, pos, now?.duration_ms);
   const line = o.lyrics && playing && ly.synced && ly.i >= 0 ? ly.lines[ly.i][1] || "♪" : null;
-  const vol = osd ? sys : null; // never 0: "{!has && vol}" would print it
+  const vol = osd ? osdVol : null; // never 0: "{!has && vol}" would print it
 
   useEffect(() => {
     const poll = () => !hidden && get("/now").then(fresh).catch(() => setNow(null));
@@ -135,7 +136,7 @@ export default function Notch() {
         else setOpen(false);
       }),
       listen("reveal", (e) => setReveal(e.payload)),
-      listen("sysvol", (e) => (setSys({ level: e.payload[0], muted: e.payload[1] }), opts.current.osd && setOsd(Date.now()))),
+      listen("sysvol", (e) => opts.current.osd && (setOsdVol({ level: e.payload[0], muted: e.payload[1] }), setOsd(Date.now()))),
       listen("level", (e) => {
         const p = e.payload;
         if (isLive.current !== p >= 0) setLive((isLive.current = p >= 0));
@@ -148,7 +149,6 @@ export default function Notch() {
         });
       }),
     ];
-    invoke("volume", {}).then((r) => r && setSys({ level: r[0], muted: r[1] }));
     return () => (clearInterval(id), offs.forEach((o) => o.then((f) => f())));
   }, []);
   const fast = open || (playing && ly.synced);
@@ -171,6 +171,7 @@ export default function Notch() {
   }, [now?.id]);
   useEffect(() => {
     if (open && has) get("/upnext").then(setUp).catch(() => {});
+    if (open) setVolume({}); // read Spotify's volume; its mixer row only exists once it has played sound
   }, [open, now?.id]);
   useEffect(() => {
     if (!osd) return;
@@ -231,11 +232,15 @@ export default function Notch() {
     if (key === "play") setNow((n) => ({ ...n, playing: !n.playing, progress_ms: pos, at: Date.now() }));
     fetch(API + "/poke", { method: "POST" }).then((r) => r.json()).then(fresh).catch(() => {});
   };
-  const setVolume = (args) => invoke("volume", args).then((r) => r && setSys({ level: r[0], muted: r[1] }));
+  const setVolume = (args) => invoke("spotify_volume", args).then((r) => {
+    const v = r && { level: r[0], muted: r[1], spotify: true };
+    setSpot(v);
+    return v;
+  });
   const wheel = (e) => {
     if (!o.scroll || Date.now() - lastWheel.current < 50) return;
     lastWheel.current = Date.now();
-    setVolume({ delta: e.deltaY < 0 ? 0.04 : -0.04 });
+    setVolume({ delta: e.deltaY < 0 ? 0.04 : -0.04 }).then((v) => v && !open && o.osd && (setOsdVol(v), setOsd(Date.now())));
   };
   const slide = (e) => {
     if (e.type === "pointerdown") e.currentTarget.setPointerCapture(e.pointerId);
@@ -253,7 +258,7 @@ export default function Notch() {
   );
   const cover = (cls) => (now?.image ? <img className={cls} src={now.image} draggable={false} /> : <div className={cls} />);
   const volBar = vol && (
-    <div className="n-vol"><Icon d={vol.muted ? "mute" : "speaker"} /><div className="n-bar"><div style={{ width: (vol.muted ? 0 : vol.level * 100) + "%" }} /></div><span>{vol.muted ? "Off" : Math.round(vol.level * 100)}</span></div>
+    <div className="n-vol"><Icon d={vol.muted ? "mute" : vol.spotify ? "spotify" : "speaker"} /><div className="n-bar"><div style={{ width: (vol.muted ? 0 : vol.level * 100) + "%" }} /></div><span>{vol.muted ? "Off" : Math.round(vol.level * 100)}</span></div>
   );
   const badge = meta && (meta.plays === 0
     ? <em className="n-chip new">First listen</em>
@@ -306,11 +311,11 @@ export default function Notch() {
             <button className="big" onClick={() => press("play")}><Icon d={now.playing ? "pause" : "play"} /></button>
             <button onClick={() => press("next")}><Icon d="next" /></button>
           </div>
-          {sys ? (
-            <div className="n-volc">
-              <button onClick={() => setVolume({ mute: !sys.muted })} title={sys.muted ? "Unmute" : "Mute"}><Icon d={sys.muted ? "mute" : "speaker"} /></button>
+          {spot ? (
+            <div className="n-volc" title="Spotify volume">
+              <button onClick={() => setVolume({ mute: !spot.muted })} title={spot.muted ? "Unmute" : "Mute"}><Icon d={spot.muted ? "mute" : "speaker"} /></button>
               <div className="n-slider" onPointerDown={slide} onPointerMove={slide}>
-                <div style={{ width: (sys.muted ? 0 : sys.level * 100) + "%" }} />
+                <div style={{ width: (spot.muted ? 0 : spot.level * 100) + "%" }} />
               </div>
             </div>
           ) : <div />}
