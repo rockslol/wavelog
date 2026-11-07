@@ -159,7 +159,8 @@ export default function Notch() {
   useEffect(() => {
     if (!now?.id) return;
     setMeta(null);
-    get(`/track/${now.id}`).then((t) => setMeta({ plays: t.plays, first: t.first })).catch((e) => setMeta(e === 404 ? { plays: 0 } : null));
+    const p = new URLSearchParams({ id: now.id, name: now.name || "", artist: now.artists || "" });
+    get(`/song-plays?${p}`).then((t) => setMeta({ plays: t.plays, first: t.first })).catch(() => setMeta(null));
     if (lastId.current && now.id !== lastId.current && opts.current.peek) {
       setPeek(true);
       lastId.current = now.id;

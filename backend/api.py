@@ -271,6 +271,20 @@ async def track(id: str):
             "peak": (q(f"{PEAK} {where} GROUP BY strftime('%Y-%W', p.played_at, 'localtime') ORDER BY 2 DESC LIMIT 1", id) or [None])[0]}
 
 
+@router.get("/song-plays")
+async def song_plays(id: str, name: str = "", artist: str = ""):
+    """Plays of a song in any version: the single, the album, a deluxe re-release all have their own track id,
+    and Last.fm imports may have picked a different one than the version playing now. Same title + same main artist."""
+    ids = {id}
+    if name and artist:
+        main = artist.split(",")[0].strip()
+        ids |= {r[0] for r in db.execute(
+            "SELECT t.id FROM tracks t JOIN track_artists ta ON ta.track_id = t.id JOIN artists ar ON ar.id = ta.artist_id "
+            "WHERE t.name = ? COLLATE NOCASE AND ar.name = ? COLLATE NOCASE", (name, main))}
+    marks = ",".join("?" * len(ids))
+    return q(f"SELECT count(*) AS plays, datetime(min(played_at), 'localtime') AS first FROM plays WHERE track_id IN ({marks})", *ids)[0]
+
+
 @router.get("/artist/{id}")
 async def artist(id: str):
     a = q("SELECT id, name, image_url AS image FROM artists WHERE id = ?", id)

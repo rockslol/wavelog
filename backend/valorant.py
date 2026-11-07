@@ -171,6 +171,7 @@ async def safe_assets():
 
 
 live_cache = {}
+tasks = set()
 
 
 async def live_match():
@@ -184,7 +185,13 @@ async def live_match():
     me = next((p for p in pres if p["puuid"] == puuid and p.get("product") == "valorant" and p.get("private")), None)
     m = (json.loads(base64.b64decode(me["private"])).get("matchPresenceData") or {}) if me else {}
     data = None
-    if m.get("sessionLoopState") in ("INGAME", "PREGAME"):
+    phase, was = m.get("sessionLoopState"), live_cache.get("phase")
+    live_cache["phase"] = phase
+    if was == "INGAME" and phase != "INGAME" and live_cache.get("match"):
+        t = asyncio.create_task(catch_up(live_cache["match"]))
+        tasks.add(t)
+        t.add_done_callback(tasks.discard)
+    if phase in ("INGAME", "PREGAME"):
         a = await safe_assets()
         data = {"state": m["sessionLoopState"], "map_id": m.get("matchMap", ""), "mode": QUEUES.get(m.get("queueId") or "", (m.get("queueId") or "").title()),
                 "map": a["maps"].get(m.get("matchMap", ""), {}).get("name", ""), "agent_id": None}
@@ -198,6 +205,26 @@ async def live_match():
                 data["agent_id"] = live_cache["agent"]
     live_cache["data"] = data
     return data
+
+
+async def catch_up(mid):
+    """A match just ended. Riot lists it in match history a little later, so look a few times until it's there."""
+    for wait in (10, 20, 30, 60, 120, 180):
+        await asyncio.sleep(wait)
+        await sync(force=True)
+        if db.execute("SELECT 1 FROM val_matches WHERE id = ?", (mid,)).fetchone():
+            log.info("Valorant match %s saved", mid)
+            return
+
+
+async def watch():
+    """While Valorant is open, follow the match state so a finished match shows up right away (the widget does the
+    same when it's open; both share the 20 s cache)."""
+    if settings.get("valorant") and in_valorant() and LOCKFILE.exists():
+        try:
+            await live_match()
+        except Exception as e:  # Riot Client starting or closing
+            log.debug("Valorant watch: %r", e)
 
 
 @router.get("/valorant/live")

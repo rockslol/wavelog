@@ -37,7 +37,8 @@ async def lifespan(app):
              asyncio.create_task(poller.loop(db.backup, 3600)),
              asyncio.create_task(poller.loop(games.track, games.EVERY)),
              asyncio.create_task(poller.loop(lastfm.auto, 1800)),
-             asyncio.create_task(poller.loop(valorant.sync, lambda: 120 if valorant.in_valorant() else 900))]
+             asyncio.create_task(poller.loop(valorant.sync, lambda: 120 if valorant.in_valorant() else 900)),
+             asyncio.create_task(poller.loop(valorant.watch, 30))]
     yield
     for t in tasks:
         t.cancel()
