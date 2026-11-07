@@ -436,13 +436,23 @@ function Search() {
   const items = r ? [...r.artists.map((x) => ["artist", x]), ...r.tracks.map((x) => ["track", x])] : [];
   const [sel, setSel] = useState(0);
   useEffect(() => setSel(0), [r]);
-  useEffect(() => panel.current?.querySelector(".sr-item.on")?.scrollIntoView({ block: "nearest" }), [sel]);
+  // Arrow keys keep the selected row visible, by setting the panel's scrollTop. Not scrollIntoView: in WebView2 it
+  // returns a Promise, and returned from an effect React called it as a cleanup and crashed the whole app (black window).
+  const byKey = useRef(false);
+  useEffect(() => {
+    const p = panel.current, el = p?.querySelector(".sr-item.on");
+    if (!byKey.current || !p || !el) return;
+    byKey.current = false;
+    if (el.offsetTop < p.scrollTop + 30) p.scrollTop = el.offsetTop - 30;
+    else if (el.offsetTop + el.offsetHeight > p.scrollTop + p.clientHeight) p.scrollTop = el.offsetTop + el.offsetHeight - p.clientHeight + 6;
+  }, [sel]);
   const pick = ([kind, x]) => (setQ(""), open({ kind, id: x.id }));
   const key = (e) => {
     if (e.key === "Escape") setQ("");
     else if (e.key === "Enter" && items[sel]) pick(items[sel]);
     else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length) {
       e.preventDefault();
+      byKey.current = true;
       setSel((i) => (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
     }
   };

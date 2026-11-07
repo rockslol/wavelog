@@ -1,3 +1,4 @@
+import { Component } from "react";
 import { createRoot } from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "@fontsource/inter/400.css";
@@ -15,4 +16,24 @@ const VIEWS = { widget: Widget, lyrics: Lyrics, calendar: Calendar, photos: Phot
 const label = getCurrentWindow().label;
 const View = VIEWS[label] || Stats;
 document.documentElement.dataset.view = label === "stats" ? "stats" : "widget";
-createRoot(document.getElementById("root")).render(<View />);
+
+// If the stats window ever crashes, show what happened and a way back instead of a black window.
+class Boundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  render() {
+    const e = this.state.error;
+    if (!e) return this.props.children;
+    return (
+      <div className="crash">
+        <b>Something went wrong</b>
+        <code>{String(e?.message || e)}</code>
+        <button className="pill glass" onClick={() => location.reload()}>Reload</button>
+      </div>
+    );
+  }
+}
+
+createRoot(document.getElementById("root")).render(label === "stats" ? <Boundary><View /></Boundary> : <View />);
