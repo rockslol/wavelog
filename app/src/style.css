@@ -4379,11 +4379,14 @@ kbd {
   overflow: hidden auto;
   padding: 6px;
   border-radius: 18px;
-  background: rgba(28, 28, 32, 0.86);
-  backdrop-filter: blur(30px) saturate(180%);
+  /* No backdrop-filter: a new blurred layer over the sidebar's blur made WebView2 drop the whole frame (black window). */
+  background: linear-gradient(rgba(44, 44, 50, 0.98), rgba(30, 30, 35, 0.98));
   box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  animation: enter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: sr-in 0.16s ease-out both;
   scrollbar-width: none;
+}
+@keyframes sr-in {
+  from { opacity: 0; translate: 0 -4px; }
 }
 .sr::-webkit-scrollbar {
   display: none;

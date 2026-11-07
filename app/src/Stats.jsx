@@ -459,7 +459,8 @@ function Search() {
   const nA = r?.artists.length || 0;
   return (
     <div className="search">
-      <input ref={input} className="glass" value={q} placeholder="Search" onChange={(e) => setQ(e.target.value)} onKeyDown={key} />
+      <input ref={input} className="glass" value={q} placeholder="Search" onChange={(e) => setQ(e.target.value)} onKeyDown={key}
+        autoComplete="off" spellCheck={false} />
       {r && at && createPortal(
         <div className="sr" ref={panel} style={at}>
           {items.length ? (
