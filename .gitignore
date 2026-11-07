@@ -35,3 +35,6 @@ app/src-tauri/binaries/
 *.log
 Thumbs.db
 .DS_Store
+
+# Release files to upload to GitHub (built, not committed)
+release/
