@@ -53,9 +53,16 @@ export function useLyrics(id, pos, duration) {
 }
 
 export const NOTCH_SECTIONS = [["clock", "Clock and weather"], ["music", "Music"], ["timer", "Focus timer"], ["calendar", "Next event"],
-  ["pc", "PC load"], ["listening", "Listening today"], ["todos", "To do"], ["valorant", "Last Valorant match"]];
+  ["pc", "PC load"], ["listening", "Listening today"], ["devices", "Batteries"], ["downloads", "Downloads"], ["todos", "To do"],
+  ["valorant", "Last Valorant match"]];
 export const NOTCH = {
   idle: "weather", open: "hover", autohide: true, monitor: "", lyrics: true, viz: true, glow: true, accent: "album", peek: true, osd: true, scroll: true, alerts: true,
-  sections: NOTCH_SECTIONS.map(([id]) => id),
+  privacy: true, downloads: true, screenshots: true, battery: true,
+  sections: NOTCH_SECTIONS.map(([id]) => id), v: 2,
 };
-export const notchOptions = (s) => ({ ...NOTCH, ...(s?.notch || {}) });
+// v2 (0.3.0) added the Batteries and Downloads sections; settings saved before that get them once.
+export const notchOptions = (s) => {
+  const n = { ...NOTCH, ...(s?.notch || {}) };
+  if (s?.notch?.sections && (s.notch.v || 1) < 2) n.sections = [...n.sections, ...["devices", "downloads"].filter((id) => !n.sections.includes(id))];
+  return n;
+};

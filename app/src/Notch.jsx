@@ -11,6 +11,18 @@ const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const parse = (s) => new Date(s.length === 10 ? s + "T00:00" : s);
 const tint = (c, a = 1) => c && `rgba(${c.map((v) => Math.round(255 * (0.3 + (0.7 * v) / Math.max(...c, 0.01)))).join(",")},${a})`;
 const since = (d) => d && new Date(d.replace(" ", "T")).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+const bytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB");
+const APP_NAMES = { discord: "Discord", chrome: "Chrome", msedge: "Edge", brave: "Brave", firefox: "Firefox", opera: "Opera", zoom: "Zoom",
+  "ms-teams": "Teams", teams: "Teams", obs64: "OBS", steam: "Steam", steamwebhelper: "Steam", "valorant-win64-shipping": "Valorant",
+  riotclientservices: "Riot Client", whatsapp: "WhatsApp", slack: "Slack", medalencoder: "Medal", medal: "Medal", windowscamera: "Camera" };
+const appName = (exe) => {
+  const b = exe.replace(/\.exe$/i, "");
+  return APP_NAMES[b.toLowerCase()] || b.charAt(0).toUpperCase() + b.slice(1);
+};
+const ago = (at) => {
+  const m = Math.floor((Date.now() / 1000 - at) / 60);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`;
+};
 const ICONS = {
   prev: "M6 6h2v12H6zM9.5 12 18 6v12z",
   next: "M16 6h2v12h-2zM6 6l8.5 6L6 18z",
@@ -31,13 +43,25 @@ const ICONS = {
   swap: "M7 7h11l-3-3 1.4-1.4L22 8l-5.6 5.4L15 12l3-3H7zM17 17H6l3 3-1.4 1.4L2 16l5.6-5.4L9 12l-3 3h11z",
   chip: "M9 9h6v6H9zM7 3h2v2h6V3h2v2h2v2h2v2h-2v6h2v2h-2v2h-2v2h-2v-2H9v2H7v-2H5v-2H3v-2h2V9H3V7h2V5h2zm0 4v10h10V7z",
   check: "M4 4h16v16H4zm2 2v12h12V6zm3.5 5.1L11 12.6l3.5-3.5 1.4 1.4-4.9 4.9-2.9-2.9z",
+  download: "M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4 3.6 3.6zM5 18h14v2H5z",
+  folder: "M3 5h7l2 2h9v12H3z",
+  open: "M14 3h7v7h-2V6.4l-9.3 9.3-1.4-1.4L17.6 5H14zM5 5h6v2H7v10h10v-4h2v6H5z",
+  trash: "M9 3h6l1 1h4v2H4V4h4zM6 8h12l-1 13H7z",
+  mic: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zM5 11h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.9V21h-2v-3.1A7 7 0 0 1 5 11z",
+  camera: "M3 6h12v12H3zM16 10l5-3v10l-5-3z",
+  battery: "M7 4h3V2h4v2h3v18H7zm2 2v14h6V6zm1 8h4v5h-4z",
+  controller: "M7 6h10a5 5 0 0 1 4.9 6l-1 5a2.5 2.5 0 0 1-4.3 1.1L14.5 16h-5l-2.1 2.1A2.5 2.5 0 0 1 3.1 17l-1-5A5 5 0 0 1 7 6zm0 3v1.5H5.5v2H7V14h2v-1.5h1.5v-2H9V9zm9 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm-2 2.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
+  headset: "M12 3a9 9 0 0 0-9 9v7a2 2 0 0 0 2 2h3v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h3a2 2 0 0 0 2-2v-7a9 9 0 0 0-9-9z",
+  mouse: "M12 2a6 6 0 0 1 6 6v8a6 6 0 0 1-12 0V8a6 6 0 0 1 6-6zm-1 2.1A4 4 0 0 0 8 8v1h3zm2 0V9h3V8a4 4 0 0 0-3-3.9zM8 11v5a4 4 0 0 0 8 0v-5z",
+  keyboard: "M2 6h20v12H2zm2 2v8h16V8zm1 1h2v2H5zm3 0h2v2H8zm3 0h2v2h-2zm3 0h2v2h-2zm3 0h2v2h-2zM5 12h2v2H5zm3 0h8v2H8zm9 0h2v2h-2z",
+  done: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.5 14.2-4.2-4.2 1.4-1.4 2.8 2.8 5.8-5.8 1.4 1.4z",
   spotify: "M12 1a11 11 0 1 0 0 22 11 11 0 0 0 0-22zm5.04 15.87a.69.69 0 0 1-.94.23c-2.58-1.58-5.83-1.93-9.65-1.06a.69.69 0 1 1-.3-1.34c4.18-.95 7.77-.54 10.66 1.23.32.2.43.62.23.94zm1.35-3a.86.86 0 0 1-1.18.28c-2.95-1.81-7.45-2.34-10.94-1.28a.86.86 0 1 1-.5-1.65c3.99-1.21 8.94-.62 12.34 1.46.4.25.53.78.28 1.19zm.11-3.13C14.96 8.64 9.12 8.45 5.74 9.47a1.03 1.03 0 1 1-.6-1.97c3.88-1.18 10.33-.95 14.4 1.46a1.03 1.03 0 0 1-1.04 1.78z",
 };
 const Icon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={ICONS[d] || ICONS.device} /></svg>;
 // Each visualizer bar wobbles at its own speed around the real audio level.
 const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
-const TILES = new Set(["timer", "calendar", "pc", "listening"]);
+const TILES = new Set(["timer", "calendar", "pc", "listening", "devices"]);
 
 function stored(key) {
   try {
@@ -92,6 +116,11 @@ export default function Notch() {
   const [up, setUp] = useState(null);
   const [todos, setTodos] = useState(null);
   const [fullH, setFullH] = useState(116);
+  const [toast, setToast] = useState(null); // screenshot or finished download, dropping out of the notch for a few seconds
+  const [batAlert, setBatAlert] = useState(null);
+  const seen = useRef({ shot: null, dl: new Set(), bat: {} });
+  const [micApps, setMicApps] = useState([]);
+  const [camApps, setCamApps] = useState([]);
   const [, tick] = useState(0);
   const timer = useRef(0), full = useRef(null), root = useRef(null), lastId = useRef(null), lastWheel = useRef(0), lastSet = useRef(0);
   const level = useRef(0), isLive = useRef(false), opts = useRef(null);
@@ -108,6 +137,9 @@ export default function Notch() {
   }, [o.monitor]);
   const today = usePoll(open && on("listening") ? "/today" : null, 60000);
   const streak = usePoll(open && on("listening") ? "/streaks" : null, 600000);
+  const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices");
+  const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat
+    ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}` : null, 1500);
   useEffect(() => setTodos(null), [set]);
 
   const d = new Date(), ms = d.getTime();
@@ -119,7 +151,22 @@ export default function Notch() {
     id: "auth", icon: <Icon d="spotify" />, tone: "#ff453a", label: now.auth === "no_client_id" ? "Finish Wavelog setup" : "Spotify signed out",
     value: now.auth === "no_client_id" ? "Set up" : "Sign in", short: "Sign in",
   };
-  const acts = [...(signin ? [signin] : []), ...activities(tm, ev, val, ms)];
+  const dls = pcl?.downloads;
+  // Live from Rust (mic: audio capture sessions, camera: Media Foundation's sensor monitor), plus the logger's registry
+  // check, which only older Windows 11 builds still fill in.
+  const mics = [...new Set([...(pcl?.mic || []), ...micApps.map(appName)])];
+  const cams = [...new Set([...(pcl?.cam || []), ...camApps.map(appName)])];
+  const pcActs = [];
+  if (batAlert && batAlert.until > ms) {
+    pcActs.push({ id: "bat", icon: <Icon d="battery" />, tone: "#ff453a", label: `${batAlert.name} battery low`, value: batAlert.text, short: `${batAlert.level}%` });
+  }
+  const downloading = o.downloads && dls?.active?.length > 0 && dls.active;
+  const dlAct = downloading && {
+    id: "dl", icon: <Icon d="download" />, tone: "#0a84ff", label: downloading.length > 1 ? `${downloading.length} downloads` : downloading[0].name || "Downloading",
+    value: bytes(downloading[0].size) + (downloading[0].speed ? ` · ${bytes(downloading[0].speed)}/s` : ""),
+    short: downloading[0].speed ? `${bytes(downloading[0].speed)}/s` : bytes(downloading[0].size),
+  };
+  const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, val, ms), ...(dlAct ? [dlAct] : [])];
   const pos = has ? Math.min(now.duration_ms, now.progress_ms + (now.playing ? ms - now.at : 0)) : 0;
   const ly = useLyrics(has ? now.id : null, pos, now?.duration_ms);
   const line = o.lyrics && playing && ly.synced && ly.i >= 0 ? ly.lines[ly.i][1] || "♪" : null;
@@ -178,6 +225,45 @@ export default function Notch() {
     const id = setTimeout(() => setOsd(0), 1400);
     return () => clearTimeout(id);
   }, [osd]);
+  // New screenshot / finished download -> toast. Battery crossing 20, 10 or 5% -> alert (once per step until it's charged).
+  useEffect(() => {
+    if (!pcl) return;
+    const sn = seen.current, t = Date.now() / 1000;
+    const shot = pcl.shot;
+    if (shot && shot.id !== sn.shot) {
+      sn.shot = shot.id;
+      if (o.screenshots && t - shot.at < 10) setToast({ kind: "shot", ...shot, until: Date.now() + 6500 });
+    }
+    for (const d of pcl.downloads?.done || []) {
+      const key = d.path + d.at;
+      if (sn.dl.has(key)) continue;
+      sn.dl.add(key);
+      if (o.downloads && t - d.at < 10) setToast({ kind: "dl", ...d, until: Date.now() + 5000 });
+    }
+    for (const b of pcl.battery || []) {
+      if (b.level == null) continue;
+      const step = [5, 10, 20].find((x) => b.level <= x);
+      if (b.level > 25) delete sn.bat[b.name];
+      else if (step && (sn.bat[b.name] == null || step < sn.bat[b.name])) {
+        sn.bat[b.name] = step;
+        if (o.battery) setBatAlert({ ...b, until: Date.now() + 15000 });
+      }
+    }
+  }, [pcl]);
+  useEffect(() => {
+    if (!o.privacy) return (setMicApps([]), setCamApps([]));
+    const keep = (l) => (p) => (p.join() === l.join() ? p : l);
+    const load = () => !hidden && Promise.all([invoke("mic_users"), invoke("camera_users")])
+      .then(([m, c]) => (setMicApps(keep(m)), setCamApps(keep(c)))).catch(() => {});
+    load();
+    const id = setInterval(load, 1500);
+    return () => clearInterval(id);
+  }, [o.privacy]);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), toast.until - Date.now());
+    return () => clearTimeout(id);
+  }, [toast]);
   useLayoutEffect(() => {
     const h = full.current?.offsetHeight;
     if (h && h !== fullH) setFullH(h);
@@ -219,13 +305,23 @@ export default function Notch() {
   const alerts = o.alerts ? acts : [];
   const kind = playing ? "music" : alerts[0] ? "act" : "idle";
   const away = o.autohide && !reveal && !vol;
-  const state = open ? "open" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
+  const state = open ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
   const bubble = (state === "mini" || state === "peek") && (kind === "music" || state === "peek" ? alerts[0] : kind === "act" ? alerts[1] : null);
   const miniW = vol || line ? 340 : kind !== "idle" ? 250 : o.idle === "time" ? 120 : 210;
-  const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: [380, 72, 28], open: [460, fullH, 32] }[state];
+  const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
   useEffect(() => {
     invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide });
   }, [w, h, !!bubble, state === "gone", o.autohide]);
+  const shotDo = (id, what) => fetch(`${API}/pc/shot/${id}/${what}`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
+  const stop = (e) => e.stopPropagation();
+  const shotButtons = (sh) => (
+    <div className="n-tbtns" onClick={stop}>
+      <button title="Open" onClick={() => shotDo(sh.id, "open")}><Icon d="open" /></button>
+      <button title="Show in folder" onClick={() => invoke("reveal", { path: sh.path })}><Icon d="folder" /></button>
+      <button title="Delete (Recycle Bin)" onClick={() => shotDo(sh.id, "delete")}><Icon d="trash" /></button>
+    </div>
+  );
+  const priv = o.privacy && (mics.length > 0 || cams.length > 0);
 
   const press = (key) => {
     invoke("media", { key });
@@ -367,6 +463,31 @@ export default function Notch() {
         <span className="n-ts">{streak?.current > 0 ? `${streak.current}-day streak` : "No streak yet"}</span>
       </div>
     ),
+    devices: pcl?.battery?.length > 0 && (
+      <div key="devices" className="n-tile n-devs">
+        <div className="n-th"><Icon d="battery" />Batteries</div>
+        {pcl.battery.slice(0, 3).map((b) => (
+          <div key={b.name} className="n-bat">
+            <Icon d={b.kind} /><span>{b.name}</span><b className={b.level != null && b.level <= 20 ? "low" : ""}>{b.level == null ? b.text : `${b.level}%`}</b>
+          </div>
+        ))}
+      </div>
+    ),
+    downloads: dls && dls.active.length + dls.done.length > 0 && (
+      <div className="n-dls">
+        <div className="n-th"><Icon d="download" />Downloads{dls.active.length > 0 && <em>{dls.active.length} active</em>}</div>
+        {dls.active.map((a, i) => (
+          <div key={"a" + i} className="n-dl busy">
+            <span className="n-dlname">{a.name || "Downloading"}</span><small>{bytes(a.size)}{a.speed ? ` · ${bytes(a.speed)}/s` : ""}</small>
+          </div>
+        ))}
+        {dls.done.slice(0, 3).map((d) => (
+          <button key={d.path + d.at} className="n-dl" title="Show in folder" onClick={(e) => (stop(e), invoke("reveal", { path: d.path }))}>
+            <span className="n-dlname">{d.name}</span><small>{bytes(d.size)} · {ago(d.at)}</small><Icon d="folder" />
+          </button>
+        ))}
+      </div>
+    ),
     todos: openTodos.length > 0 && (
       <div className="n-todos">
         <div className="n-th"><Icon d="check" />To do<em>{openTodos.length} left</em></div>
@@ -396,7 +517,7 @@ export default function Notch() {
     if (TILES.has(id) && last?.tiles) last.items.push(el);
     else blocks.push(TILES.has(id) ? { id, tiles: true, items: [el] } : { id, el });
   }
-  return (
+  return (<>
     <div ref={root} className={"notch " + state + " k-" + kind} style={style} onClick={() => setOpen(true)} onWheel={wheel}
       onMouseDown={(e) => e.button === 1 && e.preventDefault()} onAuxClick={(e) => e.button === 1 && has && press("play")}>
       <div className="n-clip">
@@ -418,10 +539,20 @@ export default function Notch() {
             {bare && !vol && <span className="n-title" />}
           </>}
         </div>
-        <div className="n-peek">
-          {cover("n-pcover")}
-          <div className="n-info"><b>{now?.name}</b><span>{now?.artists}</span>{badge}</div>
-          {viz(5)}
+        <div className={"n-peek" + (toast ? " n-toast" : "")}>
+          {toast?.kind === "shot" ? <>
+            <img className="n-shot" src={`${API}/pc/shot/${toast.id}.jpg`} draggable={false} />
+            <div className="n-info"><b>Screenshot</b><span>{toast.name}</span></div>
+            {shotButtons(toast)}
+          </> : toast ? <>
+            <span className="n-dlicon"><Icon d="done" /></span>
+            <div className="n-info"><b>Downloaded</b><span>{toast.name} · {bytes(toast.size)}</span></div>
+            <div className="n-tbtns" onClick={stop}><button title="Show in folder" onClick={() => invoke("reveal", { path: toast.path })}><Icon d="folder" /></button></div>
+          </> : <>
+            {cover("n-pcover")}
+            <div className="n-info"><b>{now?.name}</b><span>{now?.artists}</span>{badge}</div>
+            {viz(5)}
+          </>}
         </div>
         <div className="n-full" ref={full}>
           {signin && (
@@ -431,6 +562,23 @@ export default function Notch() {
                 <span className="n-title">{signin.label}</span>
                 <b style={{ color: signin.tone }}>{signin.value}</b>
               </button>
+            </div>
+          )}
+          {priv && (
+            <div className="n-acts">
+              {[["mic", mics, "#ff9f0a", "microphone"], ["camera", cams, "#30d158", "camera"]].filter(([, apps]) => apps.length).map(([icon, apps, tone, what]) => (
+                <div key={icon} className="n-act">
+                  <span className="n-icon" style={{ color: tone }}><Icon d={icon} /></span>
+                  <span className="n-title">{apps.join(", ")} {apps.length > 1 ? "are" : "is"} using your {what}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {o.screenshots && pcl?.shot && (
+            <div className="n-shotrow">
+              <img src={`${API}/pc/shot/${pcl.shot.id}.jpg`} draggable={false} />
+              <div className="n-info"><b>Screenshot</b><span>{ago(pcl.shot.at)}</span></div>
+              {shotButtons(pcl.shot)}
             </div>
           )}
           {!has && volBar}
@@ -447,5 +595,11 @@ export default function Notch() {
         </div>
       )}
     </div>
-  );
+    {priv && (
+      <div className={"n-priv" + (state === "gone" ? " solo" : "")} style={{ "--half": w / 2 + "px" }} title={[...mics, ...cams].join(", ")}>
+        {cams.length > 0 && <i className="cam" />}
+        {mics.length > 0 && <i className="mic" />}
+      </div>
+    )}
+  </>);
 }

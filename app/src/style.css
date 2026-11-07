@@ -2142,18 +2142,18 @@ kbd {
 .notch.gone {
   opacity: 0;
 }
-.notch::before, .notch::after, .n-bubble::before, .n-bubble::after {
+.notch::before, .notch::after, .n-bubble::before, .n-bubble::after, .n-priv::before, .n-priv::after {
   content: "";
   position: absolute;
   top: 0;
   width: 10px;
   height: 10px;
 }
-.notch::before, .n-bubble::before {
+.notch::before, .n-bubble::before, .n-priv::before {
   left: -10px;
   background: radial-gradient(circle at 0 100%, transparent 9.5px, #000 10px);
 }
-.notch::after, .n-bubble::after {
+.notch::after, .n-bubble::after, .n-priv::after {
   right: -10px;
   background: radial-gradient(circle at 100% 100%, transparent 9.5px, #000 10px);
 }
@@ -4492,4 +4492,235 @@ kbd {
   max-width: 560px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* 0.3.0: mic/camera dots, screenshot and download toasts, batteries, downloads */
+.n-priv {
+  position: absolute;
+  top: 0;
+  right: calc(50% + var(--half) + 14px);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 0 0 17px 17px;
+  background: #000;
+  animation: n-pop 0.5s var(--spring, ease);
+  transition: right 0.5s cubic-bezier(0.3, 1.2, 0.45, 1);
+}
+.n-priv.solo {
+  right: auto;
+  left: 50%;
+  translate: -50% 0;
+}
+.n-priv i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: n-breathe 2.4s ease-in-out infinite;
+}
+.n-priv i.mic {
+  background: #ff9f0a;
+  box-shadow: 0 0 8px #ff9f0a;
+}
+.n-priv i.cam {
+  background: #30d158;
+  box-shadow: 0 0 8px #30d158;
+}
+@keyframes n-breathe {
+  50% { opacity: 0.55; }
+}
+
+.n-peek.n-toast {
+  height: 86px;
+  gap: 12px;
+  padding: 0 14px 0 14px;
+}
+.n-shot {
+  flex: none;
+  width: 104px;
+  height: 58px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #222;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  animation: n-in 0.6s var(--spring);
+}
+.n-dlicon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(48, 209, 88, 0.16);
+  animation: n-in 0.6s var(--spring);
+}
+.n-dlicon svg {
+  width: 26px;
+  height: 26px;
+  fill: #30d158;
+}
+.n-tbtns {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.n-tbtns button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.2s var(--spring);
+}
+.n-tbtns button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.n-tbtns button:active {
+  transform: scale(0.88);
+}
+.n-tbtns button:last-child:hover {
+  background: rgba(255, 69, 58, 0.5);
+}
+.n-tbtns svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.n-shotrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 8px 10px 8px 8px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.n-full > .n-shotrow:first-child {
+  margin-top: 0;
+}
+.n-shotrow img {
+  flex: none;
+  width: 80px;
+  height: 45px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.n-devs {
+  gap: 5px;
+}
+.n-devs .n-th {
+  color: #30d158;
+}
+.n-bat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+.n-bat svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: rgba(255, 255, 255, 0.6);
+}
+.n-bat span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.8);
+}
+.n-bat b {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.n-bat b.low {
+  color: #ff453a;
+}
+
+.n-dls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.n-dls .n-th {
+  margin-bottom: 4px;
+  color: #0a84ff;
+}
+.n-dl {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.9);
+}
+button.n-dl {
+  cursor: pointer;
+}
+button.n-dl:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.n-dlname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.n-dl small {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.5);
+}
+.n-dl svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: rgba(255, 255, 255, 0.5);
+}
+.n-dl.busy::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, #0a84ff, transparent) 0 0 / 40% 100% no-repeat, rgba(255, 255, 255, 0.1);
+  animation: n-dlbar 1.3s linear infinite;
+}
+@keyframes n-dlbar {
+  from { background-position: -60% 0, 0 0; }
+  to { background-position: 160% 0, 0 0; }
+}
+.n-full > .n-head:not(:first-child) {
+  margin-top: 12px;
 }

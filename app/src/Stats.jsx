@@ -1206,6 +1206,13 @@ function Settings({ tab, setTab }) {
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
         <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
       </section>
+      <h4>Your PC</h4>
+      <section className="card group">
+        <Row label="Mic and camera dot" hint="Orange dot while an app uses your microphone, green for the camera">{nSwitch("privacy")}</Row>
+        <Row label="Screenshots" hint="A preview drops out of the notch after Win+Shift+S or PrtSc, with Open, Show and Delete">{nSwitch("screenshots")}</Row>
+        <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
+        <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
+      </section>
       <h4>Look</h4>
       <section className="card group">
         <Row label="Accent colour" hint="Progress ring, bars and lyrics">
@@ -1237,7 +1244,7 @@ function Settings({ tab, setTab }) {
           );
         })}
       </section>
-      <p className="hint foot-note">Dashboard sections show top to bottom in this order. Focus timer, Next event, PC load and Listening today are small boxes; next to each other they share a row of two. <button className="link" onClick={() => setN(NOTCH)}>Reset the notch</button></p>
+      <p className="hint foot-note">Dashboard sections show top to bottom in this order. Focus timer, Next event, PC load, Listening today and Batteries are small boxes; next to each other they share a row of two. <button className="link" onClick={() => setN(NOTCH)}>Reset the notch</button></p>
     </>,
     general: <>
       <section className="card group">

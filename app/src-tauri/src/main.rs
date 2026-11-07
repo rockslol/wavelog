@@ -302,6 +302,89 @@ fn spotify_sessions() -> Vec<windows::Win32::Media::Audio::ISimpleAudioVolume> {
     }
 }
 
+/// Apps recording from any microphone right now: active audio sessions on the capture devices. (Newer Windows 11
+/// builds no longer write mic use to the CapabilityAccessManager registry keys, so this is the reliable way.)
+#[tauri::command]
+async fn mic_users() -> Vec<String> {
+    use windows::core::Interface;
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    let mut out = vec![];
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(e) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
+        let Ok(devices) = e.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else { return out };
+        for i in 0..devices.GetCount().unwrap_or(0) {
+            let Ok(d) = devices.Item(i) else { continue };
+            let Ok(list) = d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None).and_then(|m| m.GetSessionEnumerator()) else { continue };
+            for j in 0..list.GetCount().unwrap_or(0) {
+                let Ok(s) = list.GetSession(j) else { continue };
+                if !matches!(s.GetState(), Ok(st) if st == AudioSessionStateActive) {
+                    continue;
+                }
+                let Ok(pid) = s.cast::<IAudioSessionControl2>().and_then(|s| s.GetProcessId()) else { continue };
+                let name = exe_name(pid);
+                if pid != 0 && !name.is_empty() && !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+    }
+    out
+}
+
+// Camera in use: Media Foundation's sensor activity monitor reports which processes stream from a camera (also through
+// Windows' shared Frame Server). It only watches; the camera isn't opened. Windows calls back whenever that changes.
+static CAM_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+#[windows::core::implement(windows::Win32::Media::MediaFoundation::IMFSensorActivitiesReportCallback)]
+struct CamWatch;
+
+impl windows::Win32::Media::MediaFoundation::IMFSensorActivitiesReportCallback_Impl for CamWatch_Impl {
+    fn OnActivitiesReport(&self, report: windows::core::Ref<windows::Win32::Media::MediaFoundation::IMFSensorActivitiesReport>) -> windows::core::Result<()> {
+        let r = report.ok()?;
+        let mut pids = vec![];
+        unsafe {
+            for i in 0..r.GetCount()? {
+                let a = r.GetActivityReport(i)?;
+                for j in 0..a.GetProcessCount()? {
+                    let p = a.GetProcessActivity(j)?;
+                    if p.GetStreamingState()?.as_bool() {
+                        pids.push(p.GetProcessId()?);
+                    }
+                }
+            }
+        }
+        *CAM_PIDS.lock().unwrap() = pids;
+        Ok(())
+    }
+}
+
+fn camera_watch() {
+    use windows::Win32::{Media::MediaFoundation::*, System::Com::*};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if MFStartup(MF_VERSION, MFSTARTUP_LITE).is_err() {
+            return;
+        }
+        let cb: IMFSensorActivitiesReportCallback = CamWatch.into();
+        let Ok(monitor) = MFCreateSensorActivityMonitor(&cb) else { return };
+        if monitor.Start().is_err() {
+            return;
+        }
+        loop {
+            thread::sleep(Duration::from_secs(3600)); // keeps the monitor alive; Windows calls CamWatch on its own thread
+        }
+    }
+}
+
+/// Apps streaming from a camera right now.
+#[tauri::command]
+fn camera_users() -> Vec<String> {
+    let mut out: Vec<String> = CAM_PIDS.lock().unwrap().iter().map(|&p| exe_name(p)).filter(|n| !n.is_empty()).collect();
+    out.dedup();
+    out
+}
+
 /// Spotify's own volume, not the PC's. None when Spotify isn't playing sound on this PC.
 #[tauri::command]
 async fn spotify_volume(delta: Option<f32>, set: Option<f32>, mute: Option<bool>) -> Option<(f32, bool)> {
@@ -776,7 +859,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());
@@ -822,6 +905,7 @@ fn main() {
             thread::spawn(move || notch_hover(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || notch_audio(&handle));
+            thread::spawn(camera_watch);
             let handle = app.handle().clone();
             thread::spawn(move || loop {
                 let f = fullscreen_foreground();

@@ -22,6 +22,7 @@ import db
 import debug
 import games
 import lastfm
+import pcwatch
 import poller
 import share
 import spotify
@@ -55,6 +56,7 @@ app.include_router(widgets.router)
 app.include_router(share.router)
 app.include_router(games.router)
 app.include_router(valorant.router)
+app.include_router(pcwatch.router)
 
 
 @app.get("/login")
