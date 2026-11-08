@@ -1287,6 +1287,7 @@ function Settings({ tab, setTab }) {
   });
   const field = (k) => ({ value: s[k] ?? "", onChange: (e) => setS({ ...s, [k]: e.target.value }), onBlur: submit });
   const steamId = usePoll("/steam/detect", 3600000);
+  const dc = usePoll(page === "general" ? "/discord" : null, 4000);
   const lines = (k) => ({ value: s[k].join("\n"), onChange: (e) => setS({ ...s, [k]: e.target.value.split("\n") }), onBlur: submit });
   const flip = (k, id) => set({ [k]: s[k].includes(id) ? s[k].filter((x) => x !== id) : [...s[k], id] });
   const slider = (k, min, max) => ({
@@ -1421,6 +1422,18 @@ function Settings({ tab, setTab }) {
         <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
       </section>
       <p className="hint foot-note">Shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings.</p>
+      <h4>Discord</h4>
+      <section className="card group">
+        <Row label="Discord status" hint={!dc ? "" : !dc.ready ? "Paste your Discord Application ID below first" : !s.discord ? "Shows the song you're playing on your Discord profile"
+          : dc.connected ? (dc.showing ? "Showing your song on Discord" : "Connected. Shows up when music plays") : dc.error || "Waiting for Discord"}>
+          <Switch on={!!s.discord} onChange={() => set({ discord: !s.discord })} />
+        </Row>
+        <label className="field"><span>Application ID, from discord.com/developers/applications (New Application, name it Wavelog)</span><input {...field("discord_app")} placeholder="A long number" /></label>
+        <Row label="Play count" hint="Play #52 · since Dec 2024, on the little Wavelog badge on the cover">
+          <Switch on={s.discord_plays !== false} onChange={() => set({ discord_plays: s.discord_plays === false })} />
+        </Row>
+      </section>
+      <p className="hint foot-note">Shows "Listening to" your song with the cover, artist, time and a Play on Spotify button, and clears when you pause. Turn off Spotify's own status in Discord (Settings → Connections → Spotify → Display Spotify as your status), or both show up.</p>
       <h4>Your data</h4>
       <section className="card group">
         <Row label="Export plays to CSV" hint={exported?.msg || "Every play, as a spreadsheet in Downloads"}>

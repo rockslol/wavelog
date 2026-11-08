@@ -34,7 +34,7 @@ DEFAULTS = {"widgets": ["widget"], "sizes": {}, "scale": 1.0, "tint": 0.4, "lock
             "city": "", "place": "", "lat": None, "lon": None, "fahrenheit": False,
             "cover_glass": True, "countdowns": [], "todos": [], "pomodoro": [25, 5], "note": "",
             "valorant": False, "overlay": [], "tab_y": 0.7, "notch": {},
-            "lastfm_user": "", "lastfm_key": "", "val_wishlist": [], "steam_key": "", "steam_id": ""}
+            "lastfm_user": "", "lastfm_key": "", "val_wishlist": [], "steam_key": "", "steam_id": "", "discord": False, "discord_plays": True, "discord_app": ""}
 settings = {**DEFAULTS, **(json.loads(FILE.read_text()) if FILE.exists() else {})}
 cache = {}
 db.execute("CREATE TABLE IF NOT EXISTS lyrics (track_id TEXT PRIMARY KEY, synced TEXT, plain TEXT)")
