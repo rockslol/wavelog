@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
-import { API, get, hidden, notchOptions, useLyrics, usePoll } from "./api";
+import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { condition, score, signed, WeatherIcon } from "./widgets";
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -32,6 +32,9 @@ const ICONS = {
   next: "M16 6h2v12h-2zM6 6l8.5 6L6 18z",
   play: "M8 5v14l11-7z",
   pause: "M7 5h4v14H7zM13 5h4v14h-4z",
+  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8z",
+  valorant: "M2 4l11 14H8.5L2 9.6zM22 4v6l-4.6 5.5h-4.7z",
+  plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   timer: "M9 2h6v2H9zM12 5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17zM12 7a6.5 6.5 0 1 1 0 13 6.5 6.5 0 1 1 0-13zM11 9.5h2v5h-2z",
   calendar: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
   speaker: "M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z",
@@ -66,6 +69,8 @@ const Icon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={ICO
 const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
 const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
+const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
+  outputs: "speaker", downloads: "download", todos: "check", valorant: "valorant", steam: "controller" };
 
 function stored(key) {
   try {
@@ -126,6 +131,9 @@ export default function Notch() {
   const [micApps, setMicApps] = useState([]);
   const [camApps, setCamApps] = useState([]);
   const [outs, setOuts] = useState(null);
+  const [edit, setEdit] = useState(null); // section order while arranging the dashboard (Settings > Notch > Edit)
+  const [dragging, setDragging] = useState(null);
+  const editing = useRef(false), drag = useRef(null), rects = useRef({});
   const [, tick] = useState(0);
   const timer = useRef(0), full = useRef(null), root = useRef(null), lastId = useRef(null), lastWheel = useRef(0), lastSet = useRef(0);
   const level = useRef(0), isLive = useRef(false), opts = useRef(null);
@@ -192,7 +200,13 @@ export default function Notch() {
       listen("hover", (e) => {
         clearTimeout(timer.current);
         if (e.payload) opts.current.open === "hover" && (timer.current = setTimeout(() => setOpen(true), 180));
-        else setOpen(false);
+        else if (!editing.current) setOpen(false);
+      }),
+      listen("edit", () => {
+        editing.current = true;
+        rects.current = {};
+        setEdit(opts.current.sections.filter((id) => NOTCH_SECTIONS.some(([x]) => x === id)));
+        setOpen(true);
       }),
       listen("reveal", (e) => setReveal(e.payload)),
       listen("sysvol", (e) => opts.current.osd && (setOsdVol({ level: e.payload[0], muted: e.payload[1] }), setOsd(Date.now()))),
@@ -333,13 +347,13 @@ export default function Notch() {
   const alerts = o.alerts ? acts : [];
   const kind = playing ? "music" : alerts[0] ? "act" : "idle";
   const away = o.autohide && !reveal && !vol;
-  const state = open ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
+  const state = open || edit ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
   const bubble = (state === "mini" || state === "peek") && (kind === "music" || state === "peek" ? alerts[0] : kind === "act" ? alerts[1] : null);
   const miniW = vol || line ? 340 : kind !== "idle" ? 250 : o.idle === "time" ? 120 : 210;
   const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
   useEffect(() => {
-    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide });
-  }, [w, h, !!bubble, state === "gone", o.autohide]);
+    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit });
+  }, [w, h, !!bubble, state === "gone", o.autohide, !!edit]);
   const shotDo = (id, what) => fetch(`${API}/pc/shot/${id}/${what}`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
   const stop = (e) => e.stopPropagation();
   const shotButtons = (sh) => (
@@ -393,6 +407,98 @@ export default function Notch() {
   const style = { width: w, height: h, borderRadius: `0 0 ${r}px ${r}px`, "--eq": accent, "--glow": playing && o.glow ? tint(now.color, 0.5) : "transparent" };
   const meter = (label, v) => v != null && (
     <div className="n-meter"><span>{label}</span><div className="n-bar"><div className={v > 85 ? "hot" : ""} style={{ width: v + "%" }} /></div><b>{Math.round(v)}%</b></div>
+  );
+
+  // Edit mode: wiggling cards in the dashboard's real layout. Drag to reorder, the badge removes, the tray adds back.
+  const outNow = realOuts.find(([, , def]) => def);
+  const sum = {
+    clock: weather ? `${hm(d)} · ${weather.temp}° ${condition(weather.code)}` : hm(d),
+    music: has ? `${now.name} · ${now.artists}` : "While Spotify plays",
+    timer: `${tm.mode === "focus" ? "Focus" : "Break"} · ${left(tLeft)}`,
+    calendar: !set?.calendars?.length ? "Add a calendar in Settings" : nextEvent ? nextEvent.title : "Nothing coming up",
+    pc: pc ? `CPU ${Math.round(pc.cpu)}% · RAM ${Math.round(pc.ram)}%` : "CPU, GPU and RAM",
+    listening: today ? `${today.minutes} min today` : "Minutes and streak",
+    devices: pcl?.battery?.[0] ? pcl.battery.map((b) => `${b.name} ${b.level == null ? b.text : b.level + "%"}`).join(" · ") : "Controllers, headsets, mice",
+    outputs: outNow ? outName(outNow[1])[0] : "Headphones or speakers",
+    downloads: dls?.active?.length ? `${dls.active.length} downloading` : "While a browser downloads",
+    todos: openTodos.length ? `${openTodos.length} left` : "Your to-do list",
+    valorant: "Right after a match",
+    steam: steamD?.connected && !steamD.error && !steamD.private ? `${steamD.friends.length} friends online` : "Friends online and in game",
+  };
+  const name = (id) => NOTCH_SECTIONS.find(([x]) => x === id)?.[1] || id;
+  const endEdit = (save) => {
+    if (save) {
+      fetch(API + "/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notch: { ...o, sections: edit } }) })
+        .then(() => emit("settings")).catch(() => {});
+    }
+    editing.current = false;
+    setEdit(null);
+  };
+  const grab = (id) => (e) => {
+    if (e.button !== 0 || e.target.closest(".n-x")) return;
+    e.currentTarget.parentElement.setPointerCapture(e.pointerId); // the grid: cards move in the page while you drag, which would drop the capture
+    drag.current = { id, last: null };
+    setDragging(id);
+  };
+  const dragMove = (e) => {
+    const g = drag.current;
+    if (!g) return;
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-sec]")?.dataset.sec;
+    if (over === g.last) return;
+    g.last = over; // swap once per card you move onto, so big and small cards don't trade places back and forth
+    if (!over || over === g.id) return;
+    setEdit((l) => {
+      const from = l.indexOf(g.id), to = l.indexOf(over), next = l.filter((x) => x !== g.id);
+      next.splice(next.indexOf(over) + (from < to ? 1 : 0), 0, g.id);
+      return next;
+    });
+  };
+  const drop = () => {
+    drag.current = null;
+    setDragging(null);
+  };
+  // Cards glide to their new spot instead of jumping (FLIP).
+  useLayoutEffect(() => {
+    if (!edit) return;
+    for (const el of full.current?.querySelectorAll("[data-sec]") || []) {
+      const r = el.getBoundingClientRect(), old = rects.current[el.dataset.sec];
+      if (old && (old.left !== r.left || old.top !== r.top)) {
+        el.animate([{ transform: `translate(${old.left - r.left}px, ${old.top - r.top}px)` }, { transform: "none" }], { duration: 240, easing: "cubic-bezier(.2,.8,.2,1)" });
+      }
+      rects.current[el.dataset.sec] = r;
+    }
+  }, [edit]);
+  const editor = edit && (
+    <div className="n-edit" onClick={stop}>
+      <div className="n-ehead">
+        <div><b>Edit notch</b><small>Drag to move · − to remove</small></div>
+        <button className="n-ereset" onClick={() => setEdit(NOTCH.sections)}>Reset</button>
+        <button className="n-ereset" onClick={() => endEdit(false)}>Cancel</button>
+        <button className="n-done" onClick={() => endEdit(true)}>Done</button>
+      </div>
+      <div className="n-egrid" onPointerMove={dragMove} onPointerUp={drop} onPointerCancel={drop} onLostPointerCapture={drop}>
+        {edit.map((id) => (
+          <div key={id} data-sec={id} className={"n-ed" + (TILES.has(id) ? " tile" : "") + (dragging === id ? " drag" : "")} onPointerDown={grab(id)}>
+            <div className="n-edin">
+              <button className="n-x" title={"Remove " + name(id)} onClick={() => setEdit((l) => l.filter((x) => x !== id))}>−</button>
+              <span className="n-eic"><Icon d={SECTION_ICON[id]} /></span>
+              <div className="n-etx"><b>{name(id)}</b><small>{sum[id]}</small></div>
+            </div>
+          </div>
+        ))}
+        {!edit.length && <p className="n-eempty">Nothing on the dashboard. Add something below.</p>}
+      </div>
+      {edit.length < NOTCH_SECTIONS.length && (
+        <div className="n-tray">
+          <small>Add to the notch</small>
+          <div className="n-chips">
+            {NOTCH_SECTIONS.filter(([id]) => !edit.includes(id)).map(([id, label]) => (
+              <button key={id} className="n-add" onClick={() => setEdit((l) => [...l, id])}><Icon d="plus" />{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   const parts = {
@@ -610,6 +716,7 @@ export default function Notch() {
           </>}
         </div>
         <div className="n-full" ref={full}>
+          {editor || <>
           {signin && (
             <div className="n-acts">
               <button className="n-act n-signin" onClick={() => (now.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>
@@ -642,6 +749,7 @@ export default function Notch() {
             {has && up?.device && <span><Icon d={up.kind} />{up.device}</span>}
             <button onClick={openStats}><Icon d="chart" />Stats</button>
           </div>
+          </>}
         </div>
       </div>
       {bubble && (

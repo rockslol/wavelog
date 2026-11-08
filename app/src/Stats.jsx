@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { API, get, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
@@ -1247,7 +1247,7 @@ function Settings({ tab, setTab }) {
     const load = () => get("/settings").then((j) => !stop && (setS(j), setMsg((m) => (m === "offline" ? "" : m))))
       .catch(() => !stop && (setMsg("offline"), (retry = setTimeout(load, 3000))));
     load();
-    const off = listen("settings", () => get("/settings").then((j) => setS((s) => s && { ...s, todos: j.todos })).catch(() => {}));
+    const off = listen("settings", () => get("/settings").then((j) => setS((s) => s && { ...s, todos: j.todos, notch: j.notch })).catch(() => {}));
     return () => ((stop = true), clearTimeout(retry), off.then((f) => f()));
   }, []);
   const [lf, setLf] = useState(null);
@@ -1367,6 +1367,12 @@ function Settings({ tab, setTab }) {
           <Segmented options={[["hover", "Hover"], ["click", "Click"]]} value={n.open} onChange={(v) => setN({ open: v })} />
         </Row>
         <Row label="Scroll for volume" hint="Scroll on the notch to change Spotify's volume (not the PC's)">{nSwitch("scroll")}</Row>
+      </section>
+      <section className="card group">
+        <Row label="Layout" hint={s.widgets.includes("notch") ? "Opens the notch so you can drag things around, remove them and add more, like a phone home screen"
+          : "Turn the notch on first"}>
+          <button className="primary" disabled={!s.widgets.includes("notch")} onClick={() => emitTo("notch", "edit", true)}>Edit notch</button>
+        </Row>
       </section>
       <section className="card group notch-order">
         {sections.map((id) => {

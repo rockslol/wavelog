@@ -4992,3 +4992,220 @@ button.n-dl:hover {
 .n-steam .n-th {
   color: #66c0f4;
 }
+
+/* Notch edit mode (Settings > Notch > Edit notch): wiggling cards in the dashboard's layout, like a phone home screen */
+.n-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.n-ehead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 0 6px;
+}
+.n-ehead > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.n-ehead b {
+  font-size: 14px;
+}
+.n-ehead small {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.n-ereset {
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.6);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.n-ereset:hover {
+  color: #fff;
+}
+.n-done {
+  padding: 6px 15px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.n-egrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  margin: -4px -6px 0;
+  padding: 8px 6px 4px; /* room for the − badges */
+  scrollbar-width: none;
+}
+.n-ed {
+  position: relative;
+  grid-column: span 2;
+  min-width: 0;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.n-ed.tile {
+  grid-column: span 1;
+}
+.n-edin {
+  --j: 0.35deg;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: n-wiggle 0.28s ease-in-out infinite alternate;
+  transition: background 0.2s, box-shadow 0.2s, scale 0.2s var(--spring);
+}
+.n-ed.tile .n-edin {
+  --j: 0.9deg;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 70px;
+}
+.n-ed:nth-child(even) .n-edin {
+  animation-delay: -0.14s;
+  animation-direction: alternate-reverse;
+}
+@keyframes n-wiggle {
+  from { rotate: calc(var(--j) * -1); }
+  to { rotate: var(--j); }
+}
+.n-ed.drag {
+  z-index: 3;
+  cursor: grabbing;
+}
+.n-ed.drag .n-edin {
+  animation: none;
+  scale: 1.05;
+  background: rgba(255, 255, 255, 0.17);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.n-eic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--eq, #fff) 22%, transparent);
+  color: var(--eq, #fff);
+}
+.n-eic svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+.n-etx {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.n-etx b {
+  font-size: 13px;
+}
+.n-etx small {
+  overflow: hidden;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.n-x {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  padding: 0 0 2px;
+  border: 0;
+  border-radius: 50%;
+  background: #48484a;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.n-x:hover {
+  background: #ff453a;
+}
+.n-ed.drag .n-x {
+  opacity: 0;
+}
+.n-eempty {
+  grid-column: span 2;
+  margin: 8px 0;
+  font-size: 12px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+}
+.n-tray {
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.n-tray small {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+.n-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.n-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px 6px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.n-add:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.n-add svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+@media (prefers-reduced-motion: reduce) {
+  .n-edin {
+    animation: none;
+  }
+}
