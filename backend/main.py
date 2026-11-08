@@ -27,6 +27,7 @@ import poller
 import share
 import spotify
 import steam
+import notifs
 import discordrpc
 import valorant
 import widgets
@@ -61,6 +62,7 @@ app.include_router(games.router)
 app.include_router(valorant.router)
 app.include_router(pcwatch.router)
 app.include_router(steam.router)
+app.include_router(notifs.router)
 app.include_router(discordrpc.router)
 
 

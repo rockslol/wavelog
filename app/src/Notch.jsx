@@ -35,6 +35,7 @@ const ICONS = {
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8z",
   valorant: "M2 4l11 14H8.5L2 9.6zM22 4v6l-4.6 5.5h-4.7z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  bell: "M12 2a6 6 0 0 0-6 6v4.6L4 16v1h16v-1l-2-3.4V8a6 6 0 0 0-6-6zM10 19a2 2 0 0 0 4 0z",
   timer: "M9 2h6v2H9zM12 5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17zM12 7a6.5 6.5 0 1 1 0 13 6.5 6.5 0 1 1 0-13zM11 9.5h2v5h-2z",
   calendar: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
   speaker: "M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z",
@@ -70,7 +71,7 @@ const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
 const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
 const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
-  outputs: "speaker", downloads: "download", todos: "check", valorant: "valorant", steam: "controller" };
+  outputs: "speaker", downloads: "download", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
 
 function stored(key) {
   try {
@@ -127,7 +128,7 @@ export default function Notch() {
   const [fullH, setFullH] = useState(116);
   const [toast, setToast] = useState(null); // screenshot or finished download, dropping out of the notch for a few seconds
   const [batAlert, setBatAlert] = useState(null);
-  const seen = useRef({ shot: null, dl: new Set(), bat: {} });
+  const seen = useRef({ shot: null, dl: new Set(), bat: {}, notif: null });
   const [micApps, setMicApps] = useState([]);
   const [camApps, setCamApps] = useState([]);
   const [outs, setOuts] = useState(null);
@@ -153,9 +154,9 @@ export default function Notch() {
   const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
   const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
   const [storeAlert, setStoreAlert] = useState(null);
-  const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices");
-  const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat
-    ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}` : null, 1500);
+  const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices"), wantNotif = o.notifs || on("notifications");
+  const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat || wantNotif
+    ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}&notif=${+wantNotif}` : null, 1500);
   useEffect(() => setTodos(null), [set]);
 
   const d = new Date(), ms = d.getTime();
@@ -271,6 +272,14 @@ export default function Notch() {
       sn.dl.add(key);
       if (o.downloads && t - d.at < 10) setToast({ kind: "dl", ...d, until: Date.now() + 5000 });
     }
+    // Notifications: the first read only learns what's already there; after that, anything new drops out.
+    const incoming = (pcl.notifs || []).filter((n) => !sn.notif?.has(n.id));
+    const learning = !sn.notif;
+    sn.notif ||= new Set();
+    incoming.forEach((n) => sn.notif.add(n.id));
+    const pop = !learning && o.notifs && incoming.find((n) => t - n.at < 20 && !o.notif_mute.includes(n.aumid)
+      && !(o.screenshots && /ScreenSketch/i.test(n.aumid))); // screenshots have their own pop-out
+    if (pop) setToast({ kind: "notif", ...pop, until: Date.now() + 6500 });
     for (const b of pcl.battery || []) {
       if (b.level == null) continue;
       const step = [5, 10, 20].find((x) => b.level <= x);
@@ -350,12 +359,23 @@ export default function Notch() {
   const state = open || edit ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
   const bubble = (state === "mini" || state === "peek") && (kind === "music" || state === "peek" ? alerts[0] : kind === "act" ? alerts[1] : null);
   const miniW = vol || line ? 340 : kind !== "idle" ? 250 : o.idle === "time" ? 120 : 210;
-  const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
+  const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : toast.kind === "notif" ? 420 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
   useEffect(() => {
     invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit });
   }, [w, h, !!bubble, state === "gone", o.autohide, !!edit]);
   const shotDo = (id, what) => fetch(`${API}/pc/shot/${id}/${what}`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
   const stop = (e) => e.stopPropagation();
+  const appIcon = (aumid) => `${API}/pc/app-icon?aumid=${encodeURIComponent(aumid)}`;
+  const hideBroken = (e) => (e.currentTarget.style.visibility = "hidden");
+  const openNotif = (n) => fetch(`${API}/pc/notif/${n.id}/open`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
+  const cleared = stored("notif-cleared") || 0;
+  const clearNotifs = () => {
+    try {
+      localStorage.setItem("notif-cleared", JSON.stringify(Date.now() / 1000));
+    } catch {}
+    tick((x) => x + 1);
+  };
+  const notifList = (pcl?.notifs || []).filter((n) => !o.notif_mute.includes(n.aumid) && n.at > cleared && ms / 1000 - n.at < 86400);
   const shotButtons = (sh) => (
     <div className="n-tbtns" onClick={stop}>
       <button title="Open" onClick={() => shotDo(sh.id, "open")}><Icon d="open" /></button>
@@ -421,6 +441,7 @@ export default function Notch() {
     devices: pcl?.battery?.[0] ? pcl.battery.map((b) => `${b.name} ${b.level == null ? b.text : b.level + "%"}`).join(" · ") : "Controllers, headsets, mice",
     outputs: outNow ? outName(outNow[1])[0] : "Headphones or speakers",
     downloads: dls?.active?.length ? `${dls.active.length} downloading` : "While a browser downloads",
+    notifications: notifList.length ? `${notifList.length} from today` : "Messages from your apps",
     todos: openTodos.length ? `${openTodos.length} left` : "Your to-do list",
     valorant: "Right after a match",
     steam: steamD?.connected && !steamD.error && !steamD.private ? `${steamD.friends.length} friends online` : "Friends online and in game",
@@ -649,6 +670,18 @@ export default function Notch() {
         ))}
       </div>
     ),
+    notifications: notifList.length > 0 && (
+      <div className="n-notifs">
+        <div className="n-th"><Icon d="bell" />Notifications<button className="n-clear" onClick={(e) => (stop(e), clearNotifs())}>Clear</button></div>
+        {notifList.slice(0, 4).map((n) => (
+          <button key={n.id} className="n-notif" title={`Open ${n.app}`} onClick={(e) => (stop(e), openNotif(n))}>
+            <img src={appIcon(n.aumid)} draggable={false} onError={hideBroken} />
+            <span className="n-ntx"><b>{n.title}</b><small>{o.notif_text && n.body ? n.body : n.app}</small></span>
+            <em>{ago(n.at)}</em>
+          </button>
+        ))}
+      </div>
+    ),
     todos: openTodos.length > 0 && (
       <div className="n-todos">
         <div className="n-th"><Icon d="check" />To do<em>{openTodos.length} left</em></div>
@@ -705,6 +738,15 @@ export default function Notch() {
             <img className="n-shot" src={`${API}/pc/shot/${toast.id}.jpg`} draggable={false} />
             <div className="n-info"><b>Screenshot</b><span>{toast.name}</span></div>
             {shotButtons(toast)}
+          </> : toast?.kind === "notif" ? <>
+            <span className="n-nimg">
+              <img src={toast.img ? `${API}/pc/notif/${toast.id}/image` : appIcon(toast.aumid)} draggable={false} onError={hideBroken} />
+              {toast.img && <img className="n-nbadge" src={appIcon(toast.aumid)} draggable={false} onError={hideBroken} />}
+            </span>
+            <button className="n-info n-nopen" title={`Open ${toast.app}`} onClick={(e) => (stop(e), openNotif(toast))}>
+              <b>{toast.title}</b><span>{o.notif_text && toast.body ? toast.body : toast.app}</span>
+            </button>
+            <small className="n-napp">{toast.app}</small>
           </> : toast ? <>
             <span className="n-dlicon"><Icon d="done" /></span>
             <div className="n-info"><b>Downloaded</b><span>{toast.name} · {bytes(toast.size)}</span></div>

@@ -550,8 +550,9 @@ async def battery_list():
 
 
 @router.get("/pc/live")
-async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery: bool = True):
-    return {"mic": in_use("microphone") if privacy else [], "cam": in_use("webcam") if privacy else [],
+async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery: bool = True, notif: bool = False):
+    import notifs
+    return {"notifs": await notifs.recent() if notif else None, "mic": in_use("microphone") if privacy else [], "cam": in_use("webcam") if privacy else [],
             "downloads": downloads() if dl else None, "shot": screenshot() if shot else None,
             "battery": await battery_list() if battery else []}
 

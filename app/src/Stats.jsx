@@ -1288,6 +1288,7 @@ function Settings({ tab, setTab }) {
   const field = (k) => ({ value: s[k] ?? "", onChange: (e) => setS({ ...s, [k]: e.target.value }), onBlur: submit });
   const steamId = usePoll("/steam/detect", 3600000);
   const dc = usePoll(page === "general" ? "/discord" : null, 4000);
+  const napps = usePoll(page === "notch" ? "/pc/notif-apps" : null, 10000);
   const lines = (k) => ({ value: s[k].join("\n"), onChange: (e) => setS({ ...s, [k]: e.target.value.split("\n") }), onBlur: submit });
   const flip = (k, id) => set({ [k]: s[k].includes(id) ? s[k].filter((x) => x !== id) : [...s[k], id] });
   const slider = (k, min, max) => ({
@@ -1343,7 +1344,21 @@ function Settings({ tab, setTab }) {
         <Row label="Screenshots" hint="A preview drops out of the notch after Win+Shift+S or PrtSc, with Open, Show and Delete">{nSwitch("screenshots")}</Row>
         <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
         <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
+        <Row label="Notifications" hint="Messages from Discord, WhatsApp, Mail and other apps drop out of the notch. Click one to open it">{nSwitch("notifs")}</Row>
+        <Row label="Message text" hint="Off: only the app and the sender show, handy when you share your screen">{nSwitch("notif_text")}</Row>
       </section>
+      {n.notifs && napps?.length > 0 && <>
+        <h4>Notifications from</h4>
+        <section className="card group">
+          {napps.map((a) => (
+            <Row key={a.aumid} label={a.name}>
+              <Switch on={!n.notif_mute.includes(a.aumid)}
+                onChange={() => setN({ notif_mute: n.notif_mute.includes(a.aumid) ? n.notif_mute.filter((x) => x !== a.aumid) : [...n.notif_mute, a.aumid] })} />
+            </Row>
+          ))}
+        </section>
+        <p className="hint foot-note">Apps show up here once they've sent a notification. Windows still shows its own pop-up too: to keep only the notch, open Windows Settings → System → Notifications, pick the app and turn off "Show notification banners" (leave notifications on).</p>
+      </>}
       <h4>Spotify volume</h4>
       <section className="card group">
         <Row label="Lower during calls" hint="While Discord, Teams, Zoom or a browser call uses your mic">{nSwitch("duck_calls")}</Row>
