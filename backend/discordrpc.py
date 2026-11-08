@@ -94,6 +94,27 @@ def text(s, n=128):
     return (s + "  ")[:max(2, min(len(s), n))]  # Discord wants 2 to 128 characters
 
 
+async def gaming():
+    """The game you're in, for the line under the artist: "Playing Nomad Drive", or Valorant's mode, map and agent.
+    Game sessions are saved every 15 s while a game is in front; after 90 s without one, you're done."""
+    import valorant
+    from db import db
+    row = db.execute("SELECT exe, title, end FROM game_sessions ORDER BY id DESC LIMIT 1").fetchone()
+    if not row or time.time() - row[2] > 90:
+        return None
+    exe, title, _ = row
+    if not exe.lower().startswith("valorant"):
+        return f"Playing {title}"
+    lv = valorant.live_cache.get("data") if settings.get("valorant") else None
+    if not lv:
+        return "Playing Valorant"
+    if lv["state"] == "PREGAME":
+        return " · ".join(x for x in ("Valorant agent select", lv["map"]) if x)
+    agent = (await valorant.safe_assets())["agents"].get(lv.get("agent_id") or "", {}).get("name")
+    where = " on ".join(x for x in (lv["mode"], lv["map"]) if x)
+    return "In Valorant" + (f" · {where}" if where else "") + (f" as {agent}" if agent else "")
+
+
 async def activity(c):
     import api
     t = c["track"]
@@ -104,7 +125,7 @@ async def activity(c):
         "status_display_type": 2,  # the member list says "Listening to <song>", not the app's name
         "details": text(name), "state": text(artists),
         "timestamps": {"start": start, "end": start + t["duration_ms"]},
-        "assets": {"large_image": (t["album"].get("images") or [{}])[0].get("url"), "large_text": text(t["album"]["name"])},
+        "assets": {"large_image": (t["album"].get("images") or [{}])[0].get("url"), "large_text": text(await gaming() or t["album"]["name"])},
         "buttons": [{"label": "Play on Spotify", "url": f"https://open.spotify.com/track/{t['id']}"}],
     }
     if settings.get("discord_plays", True):
@@ -126,11 +147,11 @@ async def tick():
     playing = want and c and c["playing"]
     if playing:
         act = await activity(c)
-        key = (c["track"]["id"], act["timestamps"]["start"])
+        key = (c["track"]["id"], act["timestamps"]["start"], act["assets"]["large_text"])
     else:
         act, key = None, None
     shown = state["shown"]
-    same = key == shown or (key and shown and key[0] == shown[0] and abs(key[1] - shown[1]) < 3000)  # seeking 3 s+ is a change
+    same = key == shown or (key and shown and key[0::2] == shown[0::2] and abs(key[1] - shown[1]) < 3000)  # seeking 3 s+ is a change
     if same and not (key and time.time() - state["at"] > 60):  # resend a minute later in case Discord restarted
         return
     if time.time() < state["retry"] or time.time() - state["at"] < 4:  # Discord's rate limit
