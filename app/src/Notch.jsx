@@ -19,6 +19,10 @@ const appName = (exe) => {
   const b = exe.replace(/\.exe$/i, "");
   return APP_NAMES[b.toLowerCase()] || b.charAt(0).toUpperCase() + b.slice(1);
 };
+const outName = (n) => {
+  const m = n.match(/^(.*?)\s*\((.*)\)$/);
+  return m ? [m[1], m[2]] : [n, ""];
+};
 const ago = (at) => {
   const m = Math.floor((Date.now() / 1000 - at) / 60);
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`;
@@ -61,7 +65,7 @@ const Icon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={ICO
 // Each visualizer bar wobbles at its own speed around the real audio level.
 const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
-const TILES = new Set(["timer", "calendar", "pc", "listening", "devices"]);
+const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
 
 function stored(key) {
   try {
@@ -121,6 +125,7 @@ export default function Notch() {
   const seen = useRef({ shot: null, dl: new Set(), bat: {} });
   const [micApps, setMicApps] = useState([]);
   const [camApps, setCamApps] = useState([]);
+  const [outs, setOuts] = useState(null);
   const [, tick] = useState(0);
   const timer = useRef(0), full = useRef(null), root = useRef(null), lastId = useRef(null), lastWheel = useRef(0), lastSet = useRef(0);
   const level = useRef(0), isLive = useRef(false), opts = useRef(null);
@@ -137,6 +142,9 @@ export default function Notch() {
   }, [o.monitor]);
   const today = usePoll(open && on("listening") ? "/today" : null, 60000);
   const streak = usePoll(open && on("listening") ? "/streaks" : null, 600000);
+  const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
+  const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
+  const [storeAlert, setStoreAlert] = useState(null);
   const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices");
   const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat
     ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}` : null, 1500);
@@ -157,6 +165,10 @@ export default function Notch() {
   const mics = [...new Set([...(pcl?.mic || []), ...micApps.map(appName)])];
   const cams = [...new Set([...(pcl?.cam || []), ...camApps.map(appName)])];
   const pcActs = [];
+  if (storeAlert && storeAlert.until > ms) {
+    pcActs.push({ id: "vstore", icon: storeAlert.icon ? <img src={storeAlert.icon} draggable={false} /> : <Icon d="controller" />, tone: "#ff4655",
+      label: `${storeAlert.name} is in your store`, value: `${storeAlert.price} VP`, short: "Store" });
+  }
   if (batAlert && batAlert.until > ms) {
     pcActs.push({ id: "bat", icon: <Icon d="battery" />, tone: "#ff453a", label: `${batAlert.name} battery low`, value: batAlert.text, short: `${batAlert.level}%` });
   }
@@ -216,6 +228,11 @@ export default function Notch() {
     }
     lastId.current = now.id;
   }, [now?.id]);
+  const loadOuts = () => invoke("audio_outputs").then(setOuts).catch(() => {});
+  const realOuts = (outs || []).filter(([, n]) => !/steam streaming/i.test(n)); // Steam Remote Play's virtual devices
+  useEffect(() => {
+    if (open && on("outputs")) loadOuts();
+  }, [open]);
   useEffect(() => {
     if (open && has) get("/upnext").then(setUp).catch(() => {});
     if (open) setVolume({}); // read Spotify's volume; its mixer row only exists once it has played sound
@@ -259,6 +276,17 @@ export default function Notch() {
     const id = setInterval(load, 1500);
     return () => clearInterval(id);
   }, [o.privacy]);
+  // A wishlisted skin in today's store or the night market: tell once per shop rotation.
+  useEffect(() => {
+    const hit = [...(vstore?.daily || []), ...(vstore?.night || [])].find((s) => s.wanted);
+    if (!hit) return;
+    const key = hit.id + ":" + Math.round(vstore.daily_ends || 0);
+    if (stored("val-store-alert") === key) return;
+    try {
+      localStorage.setItem("val-store-alert", JSON.stringify(key));
+    } catch {}
+    setStoreAlert({ ...hit, until: Date.now() + 20000 });
+  }, [vstore]);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), toast.until - Date.now());
@@ -463,6 +491,16 @@ export default function Notch() {
         <span className="n-ts">{streak?.current > 0 ? `${streak.current}-day streak` : "No streak yet"}</span>
       </div>
     ),
+    steam: steamD?.connected && !steamD.error && (() => {
+      const ingame = (steamD.friends || []).find((f) => f.game);
+      return (
+        <div key="steam" className="n-tile n-steam">
+          <div className="n-th"><Icon d="controller" />Steam</div>
+          <b className="n-tt">{steamD.private ? steamD.me?.game || "Friends list private" : `${steamD.friends.length} friends online`}</b>
+          <span className="n-ts">{ingame ? `${ingame.name} · ${ingame.game}` : steamD.me?.game ? `You're in ${steamD.me.game}` : "Nobody in a game"}</span>
+        </div>
+      );
+    })(),
     devices: pcl?.battery?.length > 0 && (
       <div key="devices" className="n-tile n-devs">
         <div className="n-th"><Icon d="battery" />Batteries</div>
@@ -471,6 +509,23 @@ export default function Notch() {
             <Icon d={b.kind} /><span>{b.name}</span><b className={b.level != null && b.level <= 20 ? "low" : ""}>{b.level == null ? b.text : `${b.level}%`}</b>
           </div>
         ))}
+      </div>
+    ),
+    outputs: realOuts.length > 1 && (
+      <div className="n-outs">
+        <div className="n-th"><Icon d="speaker" />Sound output</div>
+        <div className="n-outlist">
+          {realOuts.slice(0, 6).map(([id, name, def]) => {
+            const [main, sub] = outName(name);
+            const label = realOuts.filter(([, n]) => outName(n)[0] === main).length > 1 && sub ? sub : main;
+            return (
+              <button key={id} className={def ? "on" : ""} title={name}
+                onClick={(e) => (stop(e), !def && invoke("set_audio_output", { id }).then(loadOuts))}>
+                <Icon d={/head|buds|airpods|arctis|hyperx|earphone|wh-|wf-/i.test(name) ? "headset" : "speaker"} /><span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     ),
     downloads: dls && dls.active.length + dls.done.length > 0 && (

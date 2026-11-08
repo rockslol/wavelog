@@ -306,19 +306,28 @@ fn spotify_sessions() -> Vec<windows::Win32::Media::Audio::ISimpleAudioVolume> {
 /// builds no longer write mic use to the CapabilityAccessManager registry keys, so this is the reliable way.)
 #[tauri::command]
 async fn mic_users() -> Vec<String> {
+    session_apps(windows::Win32::Media::Audio::eCapture, false)
+}
+
+/// Apps (exe names) with an active audio session on any device of this direction. `loud`: only sessions that are
+/// making sound right now (peak above a whisper).
+fn session_apps(flow: windows::Win32::Media::Audio::EDataFlow, loud: bool) -> Vec<String> {
     use windows::core::Interface;
     use windows::Win32::{Media::Audio::*, System::Com::*};
     let mut out = vec![];
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let Ok(e) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
-        let Ok(devices) = e.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE) else { return out };
+        let Ok(devices) = e.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE) else { return out };
         for i in 0..devices.GetCount().unwrap_or(0) {
             let Ok(d) = devices.Item(i) else { continue };
             let Ok(list) = d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None).and_then(|m| m.GetSessionEnumerator()) else { continue };
             for j in 0..list.GetCount().unwrap_or(0) {
                 let Ok(s) = list.GetSession(j) else { continue };
                 if !matches!(s.GetState(), Ok(st) if st == AudioSessionStateActive) {
+                    continue;
+                }
+                if loud && s.cast::<Meter>().and_then(|m| m.GetPeakValue()).unwrap_or(0.0) < 0.01 {
                     continue;
                 }
                 let Ok(pid) = s.cast::<IAudioSessionControl2>().and_then(|s| s.GetProcessId()) else { continue };
@@ -330,6 +339,197 @@ async fn mic_users() -> Vec<String> {
         }
     }
     out
+}
+
+// ---- Sound output switcher -------------------------------------------------------------------------------------
+// Windows has no public API to change the default output. Everyone uses the undocumented IPolicyConfig (see the
+// Audio Switch script); only SetDefaultEndpoint is called, the other slots just keep the vtable order.
+#[allow(non_snake_case)]
+mod policy {
+    #[windows::core::interface("f8679f50-850a-41cf-9c72-430f290290c8")]
+    pub unsafe trait IPolicyConfig: windows::core::IUnknown {
+        fn GetMixFormat(&self) -> windows::core::HRESULT;
+        fn GetDeviceFormat(&self) -> windows::core::HRESULT;
+        fn ResetDeviceFormat(&self) -> windows::core::HRESULT;
+        fn SetDeviceFormat(&self) -> windows::core::HRESULT;
+        fn GetProcessingPeriod(&self) -> windows::core::HRESULT;
+        fn SetProcessingPeriod(&self) -> windows::core::HRESULT;
+        fn GetShareMode(&self) -> windows::core::HRESULT;
+        fn SetShareMode(&self) -> windows::core::HRESULT;
+        fn GetPropertyValue(&self) -> windows::core::HRESULT;
+        fn SetPropertyValue(&self) -> windows::core::HRESULT;
+        pub fn SetDefaultEndpoint(&self, id: windows::core::PCWSTR, role: windows::Win32::Media::Audio::ERole) -> windows::core::HRESULT;
+        fn SetEndpointVisibility(&self) -> windows::core::HRESULT;
+    }
+}
+use policy::IPolicyConfig;
+
+fn take_pwstr(p: windows::core::PWSTR) -> String {
+    unsafe {
+        let s = p.to_string().unwrap_or_default();
+        windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as _));
+        s
+    }
+}
+
+/// Playback devices: (id, name, is the default).
+#[tauri::command]
+async fn audio_outputs() -> Vec<(String, String, bool)> {
+    use windows::Win32::{Devices::FunctionDiscovery::PKEY_Device_FriendlyName, Media::Audio::*, System::Com::*};
+    let mut out = vec![];
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(e) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
+        let default = e.GetDefaultAudioEndpoint(eRender, eConsole).and_then(|d| d.GetId()).map(take_pwstr).unwrap_or_default();
+        let Ok(list) = e.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
+        for i in 0..list.GetCount().unwrap_or(0) {
+            let Ok(d) = list.Item(i) else { continue };
+            let Ok(id) = d.GetId().map(take_pwstr) else { continue };
+            let name = d.OpenPropertyStore(STGM_READ).and_then(|s| s.GetValue(&PKEY_Device_FriendlyName)).map(|v| v.to_string()).unwrap_or_default();
+            let is_default = id == default;
+            out.push((id, name, is_default));
+        }
+    }
+    out
+}
+
+/// Makes this device the default output for everything (games, calls, music).
+#[tauri::command]
+async fn set_audio_output(id: String) -> bool {
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let clsid = windows::core::GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+        let Ok(p) = CoCreateInstance::<_, IPolicyConfig>(&clsid, None, CLSCTX_ALL) else { return false };
+        let w: Vec<u16> = id.encode_utf16().chain([0]).collect();
+        [eConsole, eMultimedia, eCommunications].iter().all(|&r| p.SetDefaultEndpoint(windows::core::PCWSTR(w.as_ptr()), r).is_ok())
+    }
+}
+
+// ---- Auto-ducking ----------------------------------------------------------------------------------------------
+// Lowers Spotify (its own mixer row, not the PC) during calls, videos and games, and fades it back after.
+// Settings come from the logger (notch.duck_*); Valorant match state and the fullscreen game from /duck/state.
+const CALL_APPS: [&str; 14] = ["discord.exe", "teams.exe", "ms-teams.exe", "zoom.exe", "skype.exe", "slack.exe", "whatsapp.exe",
+    "telegram.exe", "signal.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"];
+const VIDEO_APPS: [&str; 11] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vlc.exe", "mpv.exe",
+    "mpc-hc64.exe", "mpc-be64.exe", "potplayermini64.exe", "microsoft.media.player.exe"];
+static DUCK_BASE: Mutex<Option<f32>> = Mutex::new(None); // Spotify's volume before the dip, put back on exit too
+
+#[derive(Clone, Copy)]
+struct DuckCfg {
+    calls: bool,
+    videos: bool,
+    valorant: bool,
+    games: bool,
+    level: f32,
+}
+
+fn http_get(path: &str) -> Option<serde_json::Value> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect_timeout(&"127.0.0.1:8721".parse().ok()?, Duration::from_millis(500)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
+    write!(s, "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
+    let mut buf = String::new();
+    s.read_to_string(&mut buf).ok()?;
+    serde_json::from_str(buf.split_once("\r\n\r\n")?.1).ok()
+}
+
+fn duck_cfg() -> Option<DuckCfg> {
+    let n = http_get("/settings")?.get("notch").cloned().unwrap_or_default();
+    let on = |k: &str, d: bool| n.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+    Some(DuckCfg {
+        calls: on("duck_calls", true),
+        videos: on("duck_videos", true),
+        valorant: on("duck_valorant", true),
+        games: on("duck_games", false),
+        level: n.get("duck_level").and_then(|v| v.as_f64()).unwrap_or(0.25) as f32,
+    })
+}
+
+fn set_spotify(sessions: &[windows::Win32::Media::Audio::ISimpleAudioVolume], v: f32) {
+    for s in sessions {
+        let _ = unsafe { s.SetMasterVolume(v.clamp(0.0, 1.0), std::ptr::null()) };
+    }
+}
+
+fn fade(sessions: &[windows::Win32::Media::Audio::ISimpleAudioVolume], from: f32, to: f32) {
+    for i in 1..=12 {
+        let t = i as f32 / 12.0;
+        set_spotify(sessions, from + (to - from) * (1.0 - (1.0 - t) * (1.0 - t)));
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn ducker() {
+    use std::time::Instant;
+    let mut cfg = DuckCfg { calls: false, videos: false, valorant: false, games: false, level: 0.25 };
+    let (mut cfg_at, mut state_at): (Option<Instant>, Option<Instant>) = (None, None);
+    let (mut in_match, mut in_game) = (false, false);
+    let (mut loud_start, mut loud_last): (Option<Instant>, Option<Instant>) = (None, None);
+    let mut set_to: Option<f32> = None; // what we set while ducked
+    let mut overridden = false; // the user moved the volume during a dip: leave it alone until the dip ends
+    let mut clear_since: Option<Instant> = None;
+    loop {
+        if cfg_at.is_none_or(|t| t.elapsed() > Duration::from_secs(15)) {
+            cfg_at = Some(Instant::now());
+            if let Some(c) = duck_cfg() {
+                cfg = c;
+            }
+        }
+        let on = cfg.calls || cfg.videos || cfg.valorant || cfg.games;
+        if (cfg.valorant || cfg.games) && state_at.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
+            state_at = Some(Instant::now());
+            if let Some(j) = http_get("/duck/state") {
+                in_match = j["valorant"] == "INGAME";
+                in_game = j["game"].is_string();
+            }
+        }
+        let call = cfg.calls && session_apps(windows::Win32::Media::Audio::eCapture, false).iter().any(|a| CALL_APPS.contains(&a.to_lowercase().as_str()));
+        let video = cfg.videos && {
+            if session_apps(windows::Win32::Media::Audio::eRender, true).iter().any(|a| VIDEO_APPS.contains(&a.to_lowercase().as_str())) {
+                loud_last = Some(Instant::now());
+                loud_start.get_or_insert(Instant::now());
+            } else if loud_last.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+                loud_start = None; // quiet for 3 s: the video stopped
+            }
+            loud_start.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) // ignore short sounds
+        };
+        let want = on && (call || video || (cfg.valorant && in_match) || (cfg.games && in_game));
+
+        let sessions = spotify_sessions();
+        match (sessions.first().and_then(|s| unsafe { s.GetMasterVolume() }.ok()), want) {
+            (None, _) => (set_to, overridden, clear_since) = (None, false, None), // Spotify isn't playing on this PC
+            (Some(cur), true) => {
+                clear_since = None;
+                if let Some(t) = set_to {
+                    if (cur - t).abs() > 0.03 {
+                        (set_to, overridden) = (None, true);
+                        *DUCK_BASE.lock().unwrap() = None;
+                    }
+                } else if !overridden {
+                    let target = cur * cfg.level;
+                    *DUCK_BASE.lock().unwrap() = Some(cur);
+                    fade(&sessions, cur, target);
+                    set_to = Some(target);
+                }
+            }
+            (Some(cur), false) => {
+                overridden = false;
+                if let Some(t) = set_to {
+                    // Wait 2 s so a pause in a call or video doesn't bounce the volume.
+                    if clear_since.get_or_insert(Instant::now()).elapsed() >= Duration::from_secs(2) {
+                        if let Some(base) = DUCK_BASE.lock().unwrap().take() {
+                            if (cur - t).abs() <= 0.03 {
+                                fade(&sessions, cur, base);
+                            }
+                        }
+                        (set_to, clear_since) = (None, None);
+                    }
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(if on { 500 } else { 3000 }));
+    }
 }
 
 // Camera in use: Media Foundation's sensor activity monitor reports which processes stream from a camera (also through
@@ -859,7 +1059,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());
@@ -906,6 +1106,7 @@ fn main() {
             let handle = app.handle().clone();
             thread::spawn(move || notch_audio(&handle));
             thread::spawn(camera_watch);
+            thread::spawn(ducker);
             let handle = app.handle().clone();
             thread::spawn(move || loop {
                 let f = fullscreen_foreground();
@@ -922,6 +1123,9 @@ fn main() {
             if let tauri::RunEvent::Exit = e {
                 if let Some(mut c) = BACKEND.lock().unwrap().take() {
                     let _ = c.kill();
+                }
+                if let Some(base) = DUCK_BASE.lock().unwrap().take() {
+                    set_spotify(&spotify_sessions(), base); // don't leave Spotify quiet when Wavelog quits mid-dip
                 }
             }
         });

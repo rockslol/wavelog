@@ -177,7 +177,7 @@ tasks = set()
 async def live_match():
     if not LOCKFILE.exists():
         return None
-    if time.time() - live_cache.get("at", 0) < 20:
+    if time.time() - live_cache.get("at", 0) < 10:
         return live_cache.get("data")
     live_cache["at"] = time.time()
     puuid, shard, hdr, (port, auth, glz) = await login()
@@ -271,3 +271,90 @@ async def valorant():
 async def refresh():
     await sync(force=time.time() - state.get("at", 0) > 30)
     return await valorant()
+
+
+# --- Store, night market, wishlist ---------------------------------------------------------------------------------
+# The daily shop (4 skins) and the night market, from the same Riot Client login as the match history. Read when asked
+# and only again after the shop resets (00:00 UTC). Skin names, pictures and rarity come from valorant-api.com.
+VP = "85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741"
+STORE = DATA / "valorant-store.json"
+store = json.loads(STORE.read_text()) if STORE.exists() else {}
+store_lock = asyncio.Lock()
+skin_cache = {}  # own cache: saving settings clears widgets.cache, and this list is big
+
+
+async def skins():
+    """Skin level uuid -> skin (uuid, name, picture, rarity colour). Cached for a day."""
+    if skin_cache.get("at", 0) > time.time() - 86400:
+        return skin_cache["levels"]
+    get = lambda path: http.get("https://valorant-api.com/v1/" + path, timeout=60)
+    r_skins, r_tiers = await asyncio.gather(get("weapons/skins"), get("contenttiers"))
+    tiers = {t["uuid"]: {"name": t["devName"], "color": "#" + (t.get("highlightColor") or "ffffff80")[:6], "icon": t.get("displayIcon")}
+             for t in r_tiers.json()["data"]}
+    levels, by_skin = {}, {}
+    for s in r_skins.json()["data"]:
+        if "Random" in s["displayName"] or s["displayName"].startswith("Standard"):
+            continue
+        lv = s.get("levels") or [{}]
+        info = {"id": s["uuid"], "name": s["displayName"], "icon": lv[0].get("displayIcon") or s.get("displayIcon"),
+                "tier": tiers.get(s.get("contentTierUuid") or "", {})}
+        by_skin[s["uuid"]] = info
+        for level in lv:
+            if level.get("uuid"):
+                levels[level["uuid"].lower()] = info
+    skin_cache.update(at=time.time(), levels=levels, skins=by_skin)
+    return levels
+
+
+async def fetch_store():
+    puuid, shard, hdr, _ = await login()
+    r = await http.post(f"https://pd.{shard}.a.pvp.net/store/v3/storefront/{puuid}", headers=hdr, json={})
+    r.raise_for_status()
+    j, now, sk = r.json(), time.time(), await skins()
+
+    def item(offer, cost=None):
+        rid = offer["Rewards"][0]["ItemID"].lower()
+        s = sk.get(rid) or {"id": rid, "name": "Unknown skin", "icon": None, "tier": {}}
+        return {**s, "price": (cost or offer.get("Cost") or {}).get(VP)}
+
+    panel, bonus = j.get("SkinsPanelLayout") or {}, j.get("BonusStore")
+    store.clear()
+    store.update(puuid=puuid, at=now, daily=[item(o) for o in panel.get("SingleItemStoreOffers", [])],
+                 daily_ends=now + panel.get("SingleItemOffersRemainingDurationInSeconds", 0))
+    if bonus:
+        store.update(night=[{**item(b["Offer"], b.get("DiscountCosts")), "was": (b["Offer"].get("Cost") or {}).get(VP),
+                             "discount": b.get("DiscountPercent")} for b in bonus.get("BonusStoreOffers", [])],
+                     night_ends=now + bonus.get("BonusStoreRemainingDurationInSeconds", 0))
+    STORE.write_text(json.dumps(store))
+
+
+@router.get("/valorant/store")
+async def store_view(refresh: bool = False):
+    if not settings.get("valorant"):
+        return {"enabled": False}
+    now, error = time.time(), None
+    if (refresh or now > store.get("daily_ends", 0)) and LOCKFILE.exists() and not store_lock.locked():
+        async with store_lock:
+            try:
+                await fetch_store()
+            except Exception as e:
+                log.warning("Store failed: %r", e)
+                error = "Couldn't read the store from Riot, will retry"
+    wanted = {w["id"] for w in settings.get("val_wishlist") or []}
+    mark = lambda items: [{**i, "wanted": i["id"] in wanted} for i in items or []]
+    fresh = now < store.get("daily_ends", 0)
+    return {"enabled": True, "daily": mark(store.get("daily")) if fresh else [], "daily_ends": store.get("daily_ends"),
+            "night": mark(store.get("night")) if now < (store.get("night_ends") or 0) else [], "night_ends": store.get("night_ends"),
+            "wishlist": settings.get("val_wishlist") or [], "riot_open": LOCKFILE.exists(),
+            "error": error or (None if fresh else "Open the Riot Client to see today's store")}
+
+
+@router.get("/valorant/skins")
+async def skin_search(q: str = ""):
+    """Skins whose name contains q, for adding to the wishlist."""
+    await skins()
+    q = q.strip().lower()
+    if len(q) < 2:
+        return []
+    hits = [s for s in skin_cache["skins"].values() if q in s["name"].lower()]
+    return sorted(hits, key=lambda s: (not s["name"].lower().startswith(q), s["name"]))[:12]

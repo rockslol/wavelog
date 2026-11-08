@@ -600,13 +600,141 @@ function Gaming({ tab, setTab }) {
               </ol>
             ) : <p className="none">No games in this range. Play something fullscreen and it shows up here.</p>}
           </section>
-          <div className="grid2">
-            <Columns title="By hour of day" data={hourData(g.hours)} />
-            <Top title="Your gaming soundtrack" items={g.soundtrack} kind="track" />
-          </div>
           <HourHeat grid={g.heat} title="When you game" hint="Hours by weekday, in local time" />
+          <SteamCard />
         </div>
       )}
+    </>
+  );
+}
+
+const shortDate = (t) => new Date(t * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+function SteamCard() {
+  const st = usePoll("/steam", 60000);
+  if (!st) return null;
+  if (!st.connected || st.error) return (
+    <section className="card">
+      <div className="head"><h3>Steam</h3></div>
+      <p className="none">{st.error || "Add a Steam API key in Settings → General to see your recent games, newest achievements and friends online here."}</p>
+    </section>
+  );
+  return (
+    <>
+      <section className="card">
+        <div className="head"><h3>Recently on Steam</h3>{st.me?.game && <span className="hint">Playing {st.me.game}</span>}</div>
+        {st.recent.length ? (
+          <div className="steam-games">
+            {st.recent.map((g) => (
+              <div key={g.appid} className="sgame">
+                <img src={g.header || g.icon} draggable={false} loading="lazy" />
+                <div className="name">{g.name}</div>
+                <div className="sub">{g.hours_2w} h in 2 weeks · {fmt(g.hours)} h total</div>
+              </div>
+            ))}
+          </div>
+        ) : <p className="none">No Steam games in the last 2 weeks.</p>}
+      </section>
+      <div className="grid2">
+        <section className="card">
+          <div className="head"><h3>Friends online</h3>{!st.private && <span className="hint">{st.friends.length} online</span>}</div>
+          {st.friends?.length ? (
+            <ul className="list">
+              {st.friends.slice(0, 8).map((f) => (
+                <li key={f.id}>
+                  <Img src={f.avatar} round />
+                  <div className="meta"><div className="name">{f.name}</div><div className={"sub" + (f.game ? " ingame" : "")}>{f.game ? `Playing ${f.game}` : "Online"}</div></div>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="none">{st.private ? "Your friends list is private. Make it public in Steam's privacy settings to see who's online." : "Nobody's online right now."}</p>}
+        </section>
+        <section className="card">
+          <div className="head"><h3>Newest achievements</h3></div>
+          {st.achievements?.length ? (
+            <ul className="list">
+              {st.achievements.map((a) => (
+                <li key={a.game + a.name + a.at}>
+                  <Img src={a.icon} />
+                  <div className="meta"><div className="name">{a.name}</div><div className="sub">{a.game} · {shortDate(a.at)}</div></div>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="none">None in your recent games, or your game details are private in Steam.</p>}
+        </section>
+      </div>
+    </>
+  );
+}
+
+const timeLeft = (t) => {
+  const s = Math.max(0, t - Date.now() / 1000), h = Math.floor(s / 3600);
+  return h >= 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${h} h ${Math.floor((s % 3600) / 60)} min`;
+};
+
+function ValStore() {
+  const [st, setSt] = useState(null);
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState([]);
+  const load = (refresh) => get("/valorant/store" + (refresh ? "?refresh=true" : "")).then(setSt).catch(() => {});
+  useEffect(() => void load(), []);
+  useEffect(() => {
+    if (q.trim().length < 2) return setHits([]);
+    const id = setTimeout(() => get("/valorant/skins?q=" + encodeURIComponent(q.trim())).then(setHits).catch(() => {}), 200);
+    return () => clearTimeout(id);
+  }, [q]);
+  if (!st?.enabled) return null;
+  const wl = st.wishlist || [];
+  const saveWl = (list) => fetch(API + "/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ val_wishlist: list }) })
+    .then(() => (emit("settings"), load())).catch(() => {});
+  const has = (id) => wl.some((w) => w.id === id);
+  const toggle = (s) => saveWl(has(s.id) ? wl.filter((w) => w.id !== s.id) : [...wl, { id: s.id, name: s.name, icon: s.icon }]);
+  const skin = (s, night) => (
+    <div key={s.id} className={"vskin" + (has(s.id) ? " wanted" : "")} style={{ "--tier": s.tier?.color || "#8a8a8a" }}>
+      <button className="vheart" title={has(s.id) ? "On your wishlist" : "Add to wishlist"} onClick={() => toggle(s)}>{has(s.id) ? "♥" : "♡"}</button>
+      {s.icon ? <img src={s.icon} draggable={false} loading="lazy" /> : <div className="vnoimg" />}
+      <div className="vname">{s.name}</div>
+      <div className="vprice">
+        {night && s.was ? <s>{fmt(s.was)}</s> : null}{fmt(s.price)} VP{night && s.discount ? <em>-{s.discount}%</em> : null}
+      </div>
+    </div>
+  );
+  return (
+    <>
+      <section className="card">
+        <div className="head">
+          <h3>Store</h3>
+          <span className="hint">{st.daily.length ? `Resets in ${timeLeft(st.daily_ends)}` : st.error}</span>
+          {st.riot_open && <button className="link" onClick={() => load(true)}>Refresh</button>}
+        </div>
+        {st.daily.length > 0 && <div className="vstore">{st.daily.map((s) => skin(s))}</div>}
+      </section>
+      {st.night?.length > 0 && (
+        <section className="card">
+          <div className="head"><h3>Night market</h3><span className="hint">Ends in {timeLeft(st.night_ends)}</span></div>
+          <div className="vstore night">{st.night.map((s) => skin(s, true))}</div>
+        </section>
+      )}
+      <section className="card">
+        <div className="head"><h3>Wishlist</h3><span className="hint">The notch tells you when one is in your store</span></div>
+        {wl.length > 0 && (
+          <div className="vwish">
+            {wl.map((w) => (
+              <span key={w.id} className="vw">{w.icon && <img src={w.icon} draggable={false} />}{w.name}<button onClick={() => toggle(w)} aria-label={"Remove " + w.name}>×</button></span>
+            ))}
+          </div>
+        )}
+        <input className="vsearch" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Add a skin, e.g. Reaver Vandal" />
+        {hits.length > 0 && (
+          <div className="vhits">
+            {hits.map((h) => (
+              <button key={h.id} className={has(h.id) ? "on" : ""} onClick={() => (toggle(h), setQ(""))}>
+                {h.icon ? <img src={h.icon} draggable={false} /> : <i />}<span>{h.name}</span>{has(h.id) && <b>✓</b>}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
     </>
   );
 }
@@ -661,6 +789,7 @@ function ValorantTab({ tab, setTab }) {
             <div className="hint">{v.error || (v.updated ? `Updated ${new Date(v.updated * 1000).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}` : "")}</div>
           </div>
         </section>
+        <ValStore />
         <div className="tiles">
           <Tile label="Matches" value={fmt(s.games)} sub={`${s.wins} won`} />
           <Tile label="Win rate" value={pct(s.wins, s.decided)} />
@@ -1157,6 +1286,7 @@ function Settings({ tab, setTab }) {
     pomodoro: s.pomodoro.map((m, i) => Math.max(1, +m || [25, 5][i])),
   });
   const field = (k) => ({ value: s[k] ?? "", onChange: (e) => setS({ ...s, [k]: e.target.value }), onBlur: submit });
+  const steamId = usePoll("/steam/detect", 3600000);
   const lines = (k) => ({ value: s[k].join("\n"), onChange: (e) => setS({ ...s, [k]: e.target.value.split("\n") }), onBlur: submit });
   const flip = (k, id) => set({ [k]: s[k].includes(id) ? s[k].filter((x) => x !== id) : [...s[k], id] });
   const slider = (k, min, max) => ({
@@ -1213,6 +1343,16 @@ function Settings({ tab, setTab }) {
         <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
         <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
       </section>
+      <h4>Spotify volume</h4>
+      <section className="card group">
+        <Row label="Lower during calls" hint="While Discord, Teams, Zoom or a browser call uses your mic">{nSwitch("duck_calls")}</Row>
+        <Row label="Lower while a video plays" hint="YouTube, Twitch and other sound from a browser or video player for more than 2 seconds">{nSwitch("duck_videos")}</Row>
+        <Row label="Lower in Valorant matches" hint="From the start of a match until you're back in the menu">{nSwitch("duck_valorant")}</Row>
+        <Row label="Lower in other games" hint="While any fullscreen game is in front">{nSwitch("duck_games")}</Row>
+        <Row label="Lower to" hint="Of Spotify's own volume. It fades back afterwards; move the volume yourself and it stays where you put it">
+          <Segmented options={[[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]]} value={n.duck_level} onChange={(v) => setN({ duck_level: v })} />
+        </Row>
+      </section>
       <h4>Look</h4>
       <section className="card group">
         <Row label="Accent colour" hint="Progress ring, bars and lyrics">
@@ -1244,7 +1384,7 @@ function Settings({ tab, setTab }) {
           );
         })}
       </section>
-      <p className="hint foot-note">Dashboard sections show top to bottom in this order. Focus timer, Next event, PC load, Listening today and Batteries are small boxes; next to each other they share a row of two. <button className="link" onClick={() => setN(NOTCH)}>Reset the notch</button></p>
+      <p className="hint foot-note">Dashboard sections show top to bottom in this order. Focus timer, Next event, PC load, Listening today, Batteries and Steam friends are small boxes; next to each other they share a row of two. <button className="link" onClick={() => setN(NOTCH)}>Reset the notch</button></p>
     </>,
     general: <>
       <section className="card group">
@@ -1269,6 +1409,12 @@ function Settings({ tab, setTab }) {
         {lf?.running && <div className="lf-bar"><div style={{ width: (lf.total ? (lf.done / lf.total) * 100 : 3) + "%" }} /></div>}
       </section>
       <p className="hint foot-note">Adds every scrobble to your stats, matched to Spotify songs. Plays you already have are skipped, so nothing counts twice. After the first import it syncs new scrobbles every 30 minutes, including from your phone while this PC was off.</p>
+      <h4>Steam</h4>
+      <section className="card group">
+        <label className="field"><span>Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)</span><input {...field("steam_key")} placeholder="32 letters and numbers" /></label>
+        <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
+      </section>
+      <p className="hint foot-note">Shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings.</p>
       <h4>Your data</h4>
       <section className="card group">
         <Row label="Export plays to CSV" hint={exported?.msg || "Every play, as a spreadsheet in Downloads"}>

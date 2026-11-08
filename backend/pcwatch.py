@@ -554,3 +554,12 @@ async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery
     return {"mic": in_use("microphone") if privacy else [], "cam": in_use("webcam") if privacy else [],
             "downloads": downloads() if dl else None, "shot": screenshot() if shot else None,
             "battery": await battery_list() if battery else []}
+
+
+@router.get("/duck/state")
+async def duck_state():
+    """For Spotify ducking in the app: Valorant's match phase and the fullscreen game in front, if any."""
+    import games
+    import valorant
+    g = games.game()
+    return {"valorant": valorant.live_cache.get("phase") if valorant.in_valorant() else None, "game": g[0] if g else None}

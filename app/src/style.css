@@ -4724,3 +4724,271 @@ button.n-dl:hover {
 .n-full > .n-head:not(:first-child) {
   margin-top: 12px;
 }
+
+/* 0.4.0: sound output switcher in the notch dashboard */
+.n-outs {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.n-outs .n-th {
+  margin-bottom: 8px;
+  color: #bf5af2;
+}
+.n-outlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.n-outlist button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 12px 0 9px;
+  border: 0;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.2s var(--spring);
+}
+.n-outlist button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.n-outlist button:active {
+  transform: scale(0.94);
+}
+.n-outlist button.on {
+  background: #fff;
+  color: #000;
+  cursor: default;
+}
+.n-outlist button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.n-outlist svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* 0.5.0: Valorant store, night market, wishlist */
+.vstore {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.vstore.night {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .vstore, .vstore.night {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.vskin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 14px 12px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tier) 26%, transparent), rgba(255, 255, 255, 0.04) 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tier) 35%, transparent);
+}
+.vskin.wanted {
+  box-shadow: inset 0 0 0 2px #ff4655, 0 0 24px -6px #ff4655;
+}
+.vskin img, .vnoimg {
+  width: 100%;
+  height: 74px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.5));
+}
+.vname {
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vprice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+}
+.vprice s {
+  color: rgba(255, 255, 255, 0.4);
+}
+.vprice em {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #ff4655;
+  font-style: normal;
+  color: #fff;
+}
+.vheart {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 15px;
+  line-height: 28px;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.3, 1.2, 0.45, 1), background 0.15s;
+}
+.vskin.wanted .vheart {
+  color: #ff4655;
+}
+.vheart:hover {
+  background: rgba(0, 0, 0, 0.55);
+  transform: scale(1.1);
+}
+.vwish {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.vw {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 4px 0 8px;
+  border-radius: 16px;
+  background: rgba(255, 70, 85, 0.14);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.vw img {
+  width: 40px;
+  height: 20px;
+  object-fit: contain;
+}
+.vw button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+.vw button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.vsearch {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  font: inherit;
+  font-size: 13px;
+  color: #fff;
+  outline: none;
+}
+.vsearch:focus {
+  background: rgba(255, 255, 255, 0.11);
+}
+.vhits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+.vhits button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+}
+.vhits button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.vhits button.on {
+  color: #ff4655;
+}
+.vhits img, .vhits i {
+  flex: none;
+  width: 56px;
+  height: 24px;
+  object-fit: contain;
+}
+.vhits span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 0.5.0: Steam */
+.steam-games {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.sgame {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sgame img {
+  width: 100%;
+  aspect-ratio: 460 / 215;
+  margin-bottom: 4px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.06);
+}
+.sgame .name {
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sub.ingame {
+  color: #a4d65e;
+}
+.n-steam .n-th {
+  color: #66c0f4;
+}

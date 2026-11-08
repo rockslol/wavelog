@@ -53,16 +53,21 @@ export function useLyrics(id, pos, duration) {
 }
 
 export const NOTCH_SECTIONS = [["clock", "Clock and weather"], ["music", "Music"], ["timer", "Focus timer"], ["calendar", "Next event"],
-  ["pc", "PC load"], ["listening", "Listening today"], ["devices", "Batteries"], ["downloads", "Downloads"], ["todos", "To do"],
-  ["valorant", "Last Valorant match"]];
+  ["pc", "PC load"], ["listening", "Listening today"], ["devices", "Batteries"], ["outputs", "Sound output"], ["downloads", "Downloads"], ["todos", "To do"],
+  ["valorant", "Last Valorant match"], ["steam", "Steam friends"]];
 export const NOTCH = {
   idle: "weather", open: "hover", autohide: true, monitor: "", lyrics: true, viz: true, glow: true, accent: "album", peek: true, osd: true, scroll: true, alerts: true,
   privacy: true, downloads: true, screenshots: true, battery: true,
-  sections: NOTCH_SECTIONS.map(([id]) => id), v: 2,
+  duck_calls: true, duck_videos: true, duck_valorant: true, duck_games: false, duck_level: 0.25,
+  sections: NOTCH_SECTIONS.map(([id]) => id), v: 4,
 };
-// v2 (0.3.0) added the Batteries and Downloads sections; settings saved before that get them once.
+// Dashboard sections added by later versions; layouts saved before that get them once.
+const ADDED = [[2, ["devices", "downloads"]], [3, ["outputs"]], [4, ["steam"]]];
 export const notchOptions = (s) => {
   const n = { ...NOTCH, ...(s?.notch || {}) };
-  if (s?.notch?.sections && (s.notch.v || 1) < 2) n.sections = [...n.sections, ...["devices", "downloads"].filter((id) => !n.sections.includes(id))];
+  if (s?.notch?.sections) {
+    for (const [v, ids] of ADDED) if ((s.notch.v || 1) < v) n.sections = [...n.sections, ...ids.filter((id) => !n.sections.includes(id))];
+  }
+  n.v = NOTCH.v; // saved with the next change, so a section you turn off stays off
   return n;
 };
