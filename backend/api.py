@@ -186,8 +186,55 @@ def previous(r):
 @router.get("/summary")
 async def summary(r: Range = R, year: int = None):
     out = totals(*span(r, year))
-    prev = None if year else previous(r)
+    prev = span(r, year - 1) if year else previous(r)
     return out | {"prev": totals(*prev) if prev else None}
+
+
+def window_pair(r, year):
+    """The chosen period and the one to compare it with: the same-length period before it, or the year before."""
+    if year:
+        return span(r, year), span(r, year - 1)
+    prev = previous(r) if r != "today" else None
+    return (span(r, year), prev) if prev else (None, None)
+
+
+def movers(kind, cur, prev):
+    """Play counts per artist or track in both periods, for the biggest risers and fallers."""
+    (a, b), (pa, pb) = cur, prev
+    if kind == "artists":
+        sql = ("SELECT ar.id, ar.name, ar.image_url AS image, NULL AS artists, "
+               "sum(p.played_at >= ? AND p.played_at < ?) AS now, sum(p.played_at >= ? AND p.played_at < ?) AS before "
+               "FROM plays p JOIN track_artists ta ON ta.track_id = p.track_id JOIN artists ar ON ar.id = ta.artist_id "
+               "WHERE (p.played_at >= ? AND p.played_at < ?) OR (p.played_at >= ? AND p.played_at < ?) GROUP BY ar.id")
+    else:
+        sql = (f"SELECT t.id, t.name, al.image_url AS image, {ARTISTS} AS artists, "
+               "sum(p.played_at >= ? AND p.played_at < ?) AS now, sum(p.played_at >= ? AND p.played_at < ?) AS before "
+               "FROM plays p JOIN tracks t ON t.id = p.track_id LEFT JOIN albums al ON al.id = t.album_id "
+               "WHERE (p.played_at >= ? AND p.played_at < ?) OR (p.played_at >= ? AND p.played_at < ?) GROUP BY t.id")
+    rows = [x for x in q(sql, a, b, pa, pb, a, b, pa, pb) if max(x["now"], x["before"]) >= 3]
+    up = sorted((x for x in rows if x["now"] > x["before"]), key=lambda x: (x["before"] - x["now"], -x["now"]))[:5]
+    down = sorted((x for x in rows if x["now"] < x["before"]), key=lambda x: (x["now"] - x["before"], -x["before"]))[:5]
+    return up, down
+
+
+@router.get("/compare")
+async def compare(r: Range = R, year: int = None):
+    """What changed against the period before: new artists, and the artists and songs that rose or fell the most."""
+    cur, prev = window_pair(r, year)
+    if not cur:
+        return None
+    a, b = cur
+    first = ("SELECT ta.artist_id AS id, min(p.played_at) AS first FROM plays p "
+             "JOIN track_artists ta ON ta.track_id = p.track_id GROUP BY ta.artist_id")
+    new = q(f"SELECT ar.id, ar.name, ar.image_url AS image, count(*) AS plays FROM ({first}) f "
+            "JOIN artists ar ON ar.id = f.id JOIN track_artists ta ON ta.artist_id = f.id JOIN plays p ON p.track_id = ta.track_id "
+            f"WHERE f.first >= ? AND f.first < ? AND {WHERE} GROUP BY ar.id ORDER BY plays DESC", a, b, a, b)
+    had_before = db.execute(f"SELECT 1 FROM plays p WHERE {WHERE} LIMIT 1", prev).fetchone()
+    out = {"new_artists": len(new), "new": new[:5], "had_before": bool(had_before)}
+    for kind in ("artists", "tracks"):
+        up, down = movers(kind, cur, prev) if had_before else ([], [])
+        out[kind] = {"up": up, "down": down}
+    return out
 
 
 @router.get("/top/{kind}")

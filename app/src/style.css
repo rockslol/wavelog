@@ -5579,3 +5579,50 @@ button.n-dl:hover {
     margin-bottom: 2px;
   }
 }
+
+/* Risers and fallers */
+.movers .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mv-vs {
+  margin: -6px 0 6px;
+}
+.mv-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
+}
+.mv-h {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mv {
+  align-self: center;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mv.up {
+  color: #30d158;
+}
+.mv.down {
+  color: #ff6961;
+}
+.y-vs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+@media (max-width: 760px) {
+  .mv-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

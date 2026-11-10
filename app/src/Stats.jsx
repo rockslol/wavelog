@@ -537,6 +537,39 @@ function Top({ title, items, round, kind }) {
   );
 }
 
+// Artists or songs that rose and fell the most against the period before.
+function Movers({ c, vs, title = "Risers and fallers", news }) {
+  const open = useContext(Open);
+  const [kind, setKind] = useState("artists");
+  if (!c?.had_before) return null;
+  const list = c[kind];
+  const row = (x, up) => (
+    <li key={x.id} className="clickable" onClick={() => open({ kind: kind === "artists" ? "artist" : "track", id: x.id })}>
+      <Img src={x.image} round={kind === "artists"} />
+      <div className="meta">
+        <div className="name">{x.name}</div>
+        <div className="sub">{x.artists ? x.artists + " · " : ""}{fmt(x.before)} → {fmt(x.now)} plays</div>
+      </div>
+      <span className={"mv " + (up ? "up" : "down")}>{up ? "↑" : "↓"} {fmt(Math.abs(x.now - x.before))}</span>
+    </li>
+  );
+  const col = (label, items, up) => (
+    <div>
+      <h4 className="mv-h">{label}</h4>
+      {items.length ? <ol className="list">{items.map((x) => row(x, up))}</ol> : <p className="none">{up ? "Nothing rose" : "Nothing fell"}</p>}
+    </div>
+  );
+  return (
+    <section className="card movers">
+      <div className="head"><h3>{title}</h3><Segmented options={[["artists", "Artists"], ["tracks", "Songs"]]} value={kind} onChange={setKind} /></div>
+      {vs && <p className="hint mv-vs">{vs}{news && c.new_artists > 0 ? ` · ${fmt(c.new_artists)} new ${c.new_artists === 1 ? "artist" : "artists"}: ${newSub(c)}` : ""}</p>}
+      <div className="mv-cols">{col("Rising", list.up, true)}{col("Falling", list.down, false)}</div>
+    </section>
+  );
+}
+
+const newSub = (c) => c.new.length ? c.new.slice(0, 2).map((a) => a.name).join(", ") + (c.new_artists > 2 ? ` and ${fmt(c.new_artists - 2)} more` : "") : "First time you played them";
+
 function Binged({ items }) {
   const open = useContext(Open);
   return (
@@ -1038,6 +1071,7 @@ function Overview({ tab, setTab }) {
     summary: "/summary?" + q, streaks: "/streaks?" + q, days: "/days?" + q, hours: "/hours?" + q, weekdays: "/weekdays?" + q,
     tracks: `/top/tracks?${q}&limit=10`, artists: `/top/artists?${q}&limit=10`, albums: `/top/albums?${q}&limit=10`, binged: `/binged?${q}&limit=5`,
     heat: "/heat?" + q, skips: `/skips?${q}&limit=5`, daily: `/daily?${q}&limit=60`,
+    ...(range === "week" || range === "month" || range === "year" ? { compare: "/compare?" + q } : {}),
   });
   const prev = d?.summary?.prev;
   const change = (k) => (prev && prev[k] > 0 ? (d.summary[k] - prev[k]) / prev[k] : null);
@@ -1074,6 +1108,7 @@ function Overview({ tab, setTab }) {
           <div className="s4"><Top title="Top tracks" items={d.tracks} kind="track" /></div>
           <div className="s4"><Top title="Top artists" items={d.artists} round kind="artist" /></div>
           <div className="s4"><Top title="Top albums" items={d.albums} /></div>
+          {d.compare?.had_before && <div className="s12"><Movers c={d.compare} vs={vs} news /></div>}
           {range !== "today" && d.daily.length > 0 && <div className="s12"><Daily items={d.daily} /></div>}
           <div className="s6"><Binged items={d.binged} /></div>
           <div className="s6"><Skipped items={d.skips} /></div>
@@ -1088,7 +1123,7 @@ function Year({ year }) {
   const { data: d, loading, error } = useApi({
     summary: "/summary?" + q, streaks: "/streaks?" + q, days: "/days?" + q, hours: "/hours?" + q, weekdays: "/weekdays?" + q,
     tracks: `/top/tracks?${q}&limit=5`, artists: `/top/artists?${q}&limit=5`, albums: `/top/albums?${q}&limit=1`, binged: `/binged?${q}&limit=5`,
-    heat: "/heat?" + q,
+    heat: "/heat?" + q, compare: "/compare?" + q,
   });
   const [shared, setShared] = useState(null);
   const share = () => {
@@ -1098,6 +1133,8 @@ function Year({ year }) {
   };
   if (!d) return <Status error={error} />;
   const s = d.summary, artist = d.artists[0], album = d.albums[0];
+  const last = s.prev?.minutes > 0 ? s.prev : null, vsYear = `Compared with ${year - 1}`;
+  const yChange = (k) => (last && last[k] > 0 ? (s[k] - last[k]) / last[k] : null);
   const day = maxBy(d.days, "minutes"), hour = maxBy(d.hours, "minutes"), weekday = maxBy(d.weekdays, "minutes");
   return (
     <div className={"body" + (loading ? " loading" : "")}>
@@ -1112,6 +1149,7 @@ function Year({ year }) {
         <div className="big-number">{fmt(s.minutes)}</div>
         <p>minutes listened. That's {hours(s.minutes)}, or {(s.minutes / 1440).toFixed(1)} days.</p>
         <div className="sub">{fmt(s.plays)} plays · {fmt(s.tracks)} tracks · {fmt(s.artists)} artists</div>
+        {last && <div className="sub y-vs"><Delta v={yChange("minutes")} vs={vsYear} /> minutes compared with {year - 1} ({fmt(last.minutes)})</div>}
       </section>
       {artist && (
         <section className="card spotlight">
@@ -1134,7 +1172,9 @@ function Year({ year }) {
         <Tile label="Favourite day" value={weekday?.day || "None"} sub={weekday && `${fmt(weekday.minutes)} minutes`} />
         <Tile label="Longest streak" value={days(d.streaks.longest?.days || 0)}
           sub={d.streaks.longest && `${nice(d.streaks.longest.start)} to ${nice(d.streaks.longest.end)}`} />
+        {d.compare && <Tile label="New artists" value={fmt(d.compare.new_artists)} sub={newSub(d.compare)} />}
       </div>
+      <Movers c={d.compare} vs={vsYear} title={`Risers and fallers since ${year - 1}`} />
       <Columns title="Minutes per month" data={timeline(d.days, null, year)} />
       <CalendarHeat days={d.days} from={new Date(year, 0, 1)} to={new Date(Math.min(new Date(), new Date(year, 11, 31)))} title={`${year} in days`} />
       <HourHeat grid={d.heat} />
