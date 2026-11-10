@@ -549,12 +549,47 @@ async def battery_list():
     return bat["list"]
 
 
+# ---- network: speed, and whether the internet is reachable ----
+
+net_state = {"t": 0.0, "rx": 0, "tx": 0, "down": 0.0, "up": 0.0, "online": None, "fails": 0, "checked": 0.0, "checking": False}
+
+
+async def check_online():
+    """Windows' own connectivity test page. Two failures in a row before calling it offline, so one slow answer doesn't."""
+    import widgets
+    try:
+        r = await widgets.http.get("http://www.msftconnecttest.com/connecttest.txt", timeout=5)
+        ok = r.status_code == 200 and "Microsoft" in r.text
+    except Exception:
+        ok = False
+    net_state["fails"] = 0 if ok else net_state["fails"] + 1
+    if ok or net_state["fails"] >= 2:
+        net_state["online"] = ok
+    net_state["checking"] = False
+
+
+def network():
+    """Speed since the last call (at most once a second, its own sample so the PC monitor widget isn't thrown off)."""
+    import psutil
+    now, io_ = time.time(), psutil.net_io_counters()
+    s = net_state
+    if now - s["t"] >= 1:
+        if s["t"]:
+            dt = now - s["t"]
+            s["down"], s["up"] = max(0, io_.bytes_recv - s["rx"]) / dt, max(0, io_.bytes_sent - s["tx"]) / dt
+        s["t"], s["rx"], s["tx"] = now, io_.bytes_recv, io_.bytes_sent
+    if now - s["checked"] >= 10 and not s["checking"]:
+        s["checked"], s["checking"] = now, True
+        asyncio.get_running_loop().create_task(check_online())
+    return {"down": round(s["down"]), "up": round(s["up"]), "online": s["online"]}
+
+
 @router.get("/pc/live")
-async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery: bool = True, notif: bool = False):
+async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery: bool = True, notif: bool = False, net: bool = False):
     import notifs
     return {"notifs": await notifs.recent() if notif else None, "mic": in_use("microphone") if privacy else [], "cam": in_use("webcam") if privacy else [],
             "downloads": downloads() if dl else None, "shot": screenshot() if shot else None,
-            "battery": await battery_list() if battery else []}
+            "battery": await battery_list() if battery else [], "net": network() if net else None}
 
 
 @router.get("/duck/state")

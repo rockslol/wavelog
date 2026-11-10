@@ -36,6 +36,8 @@ const ICONS = {
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8z",
   valorant: "M2 4l11 14H8.5L2 9.6zM22 4v6l-4.6 5.5h-4.7z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  wifi: "M12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM7.8 14.6a6 6 0 0 1 8.4 0l-1.4 1.4a4 4 0 0 0-5.6 0zM4.9 11.7a10 10 0 0 1 14.2 0l-1.4 1.4a8 8 0 0 0-11.4 0zM2 8.8a14 14 0 0 1 20 0l-1.4 1.4a12 12 0 0 0-17.2 0z",
+  nowifi: "M3.3 2 22 20.7l-1.4 1.4-7.2-7.2A4 4 0 0 0 9.2 16l-1.4-1.4a6 6 0 0 1 3.6-1.7L9 10.5a10 10 0 0 0-4.1 2.6l-1.4-1.4A12 12 0 0 1 7.4 9L5.1 6.7A14 14 0 0 0 2 9.2L.6 7.8A16 16 0 0 1 3.6 5.2L1.9 3.4zM12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM12 5a16 16 0 0 1 11.4 4.8L22 11.2A14 14 0 0 0 10.6 7.1z",
   tray: "M3 13h5l1.5 2.5h5L16 13h5v7H3zM6 4h12l2.6 7H15l-1.5 2.5h-3L9 11H3.4z",
   bell: "M12 2a6 6 0 0 0-6 6v4.6L4 16v1h16v-1l-2-3.4V8a6 6 0 0 0-6-6zM10 19a2 2 0 0 0 4 0z",
   timer: "M9 2h6v2H9zM12 5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17zM12 7a6.5 6.5 0 1 1 0 13 6.5 6.5 0 1 1 0-13zM11 9.5h2v5h-2z",
@@ -159,9 +161,12 @@ export default function Notch() {
   const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
   const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
   const [storeAlert, setStoreAlert] = useState(null);
+  const [netAlert, setNetAlert] = useState(null); // "Back online" for a few seconds
+  const netHigh = useRef(0), wasOnline = useRef(null);
   const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices"), wantNotif = o.notifs || on("notifications");
-  const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat || wantNotif
-    ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}&notif=${+wantNotif}` : null, 1500);
+  const wantNet = o.net_speed || o.offline;
+  const pcl = usePoll(o.privacy || o.screenshots || wantDl || wantBat || wantNotif || wantNet
+    ? `/pc/live?privacy=${+o.privacy}&shot=${+o.screenshots}&dl=${+wantDl}&battery=${+wantBat}&notif=${+wantNotif}&net=${+wantNet}` : null, 1500);
   useEffect(() => setTodos(null), [set]);
 
   const d = new Date(), ms = d.getTime();
@@ -192,7 +197,19 @@ export default function Notch() {
     value: bytes(downloading[0].size) + (downloading[0].speed ? ` · ${bytes(downloading[0].speed)}/s` : ""),
     short: downloading[0].speed ? `${bytes(downloading[0].speed)}/s` : bytes(downloading[0].size),
   };
-  const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, val, ms), ...(dlAct ? [dlAct] : [])];
+  // Network: no internet (until it's back), back online (a few seconds), and the speed while something big downloads.
+  const net = pcl?.net;
+  if (o.offline && net?.online === false) {
+    pcActs.unshift({ id: "offline", icon: <Icon d="nowifi" />, tone: "#ff453a", label: "No internet", value: "Offline", short: "Offline" });
+  } else if (netAlert && netAlert > ms) {
+    pcActs.push({ id: "online", icon: <Icon d="wifi" />, tone: "#30d158", label: "Back online", value: "Connected", short: "Online" });
+  }
+  const fastNet = o.net_speed && net && !downloading && netHigh.current && ms - netHigh.current >= 5000;
+  const netAct = fastNet && {
+    id: "net", icon: <Icon d="download" />, tone: "#0a84ff", label: "Network", value: `↓ ${bytes(net.down)}/s · ↑ ${bytes(net.up)}/s`,
+    short: `${bytes(Math.max(net.down, net.up))}/s`,
+  };
+  const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, val, ms), ...(dlAct ? [dlAct] : []), ...(netAct ? [netAct] : [])];
   const pos = has ? Math.min(now.duration_ms, now.progress_ms + (now.playing ? ms - now.at : 0)) : 0;
   const ly = useLyrics(has ? now.id : null, pos, now?.duration_ms);
   const line = o.lyrics && playing && ly.synced && ly.i >= 0 ? ly.lines[ly.i][1] || "♪" : null;
@@ -300,6 +317,13 @@ export default function Notch() {
     const pop = !learning && o.notifs && incoming.find((n) => t - n.at < 20 && !o.notif_mute.includes(n.aumid)
       && !(o.screenshots && /ScreenSketch/i.test(n.aumid))); // screenshots have their own pop-out
     if (pop) setToast({ kind: "notif", ...pop, until: Date.now() + 6500 });
+    if (pcl.net) {
+      const top = Math.max(pcl.net.down, pcl.net.up);
+      if (top >= 1e6) netHigh.current ||= Date.now();
+      else if (top < 5e5) netHigh.current = 0;
+      if (pcl.net.online === true && wasOnline.current === false && o.offline) setNetAlert(Date.now() + 5000);
+      if (pcl.net.online != null) wasOnline.current = pcl.net.online;
+    }
     for (const b of pcl.battery || []) {
       if (b.level == null) continue;
       const step = [5, 10, 20].find((x) => b.level <= x);
@@ -647,6 +671,7 @@ export default function Notch() {
         {meter("CPU", pc.cpu)}
         {meter("GPU", pc.gpu)}
         {meter("RAM", pc.ram)}
+        {pc.down != null && <div className="n-netline"><Icon d="wifi" />↓ {bytes(pc.down)}/s<span>↑ {bytes(pc.up)}/s</span></div>}
       </div>
     ),
     listening: today && (

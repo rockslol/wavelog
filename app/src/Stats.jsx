@@ -1310,7 +1310,7 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
 };
@@ -1593,6 +1593,11 @@ function Settings({ tab, setTab }) {
         <Row label="Screenshots" hint="A preview drops out of the notch after Win+Shift+S or PrtSc, with Open, Show and Delete">{nSwitch("screenshots")}</Row>
         <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
         <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
+      </section>
+      <h4>Network</h4>
+      <section className="card group">
+        <Row label="Network speed" hint="Download and upload speed in the notch while something big downloads (over 1 MB/s for a few seconds)">{nSwitch("net_speed")}</Row>
+        <Row label="No internet alert" hint="Tells you when the connection drops, and again when it's back">{nSwitch("offline")}</Row>
       </section>
       <h4>Notifications</h4>
       <section className="card group">
