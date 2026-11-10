@@ -4640,7 +4640,7 @@ dependencies = [
 
 [[package]]
 name = "wavelog"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "serde_json",
  "tauri",
