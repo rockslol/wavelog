@@ -20,6 +20,13 @@ const appName = (exe) => {
   const b = exe.replace(/\.exe$/i, "");
   return APP_NAMES[b.toLowerCase()] || b.charAt(0).toUpperCase() + b.slice(1);
 };
+const PLAYERS = { chrome: "Chrome", msedge: "Edge", brave: "Brave", firefox: "Firefox", "308046b0af4a39cb": "Firefox", opera: "Opera", vlc: "VLC",
+  "microsoft.zunemusic": "Media Player", "microsoft.zunevideo": "Movies & TV", applemusic: "Apple Music", itunes: "iTunes", tidal: "TIDAL", deezer: "Deezer",
+  amazonmusic: "Amazon Music", soundcloud: "SoundCloud", youtube: "YouTube", discord: "Discord" };
+const playerName = (id) => {
+  const l = id.toLowerCase(), k = Object.keys(PLAYERS).find((x) => l.includes(x));
+  return k ? PLAYERS[k] : appName(id.split(/[\\!]/).pop());
+};
 const outName = (n) => {
   const m = n.match(/^(.*?)\s*\((.*)\)$/);
   return m ? [m[1], m[2]] : [n, ""];
@@ -118,7 +125,9 @@ function activities(timer, ev, v, now) {
 }
 
 export default function Notch() {
-  const [now, setNow] = useState(null);
+  const [spNow, setNow] = useState(null);
+  const [other, setOther] = useState(null); // another app playing (YouTube, VLC...), from Windows' media controls
+  const otherPlay = useRef(null);
   const [open, setOpen] = useState(false);
   const [reveal, setReveal] = useState(true);
   const [peek, setPeek] = useState(false);
@@ -172,13 +181,14 @@ export default function Notch() {
   useEffect(() => setTodos(null), [set]);
 
   const d = new Date(), ms = d.getTime();
+  const now = !spNow?.playing && other ? other : spNow;
   const has = !!now?.id;
   const playing = has && now.playing;
   const fresh = (n) => setNow({ ...n, at: Date.now() });
   const tm = stored("timer") || NO_TIMER;
-  const signin = now?.auth && now.auth !== "ok" && {
-    id: "auth", icon: <Icon d="spotify" />, tone: "#ff453a", label: now.auth === "no_client_id" ? "Finish Wavelog setup" : "Spotify signed out",
-    value: now.auth === "no_client_id" ? "Set up" : "Sign in", short: "Sign in",
+  const signin = spNow?.auth && spNow.auth !== "ok" && {
+    id: "auth", icon: <Icon d="spotify" />, tone: "#ff453a", label: spNow.auth === "no_client_id" ? "Finish Wavelog setup" : "Spotify signed out",
+    value: spNow.auth === "no_client_id" ? "Set up" : "Sign in", short: "Sign in",
   };
   const dls = pcl?.downloads;
   // Live from Rust (mic: audio capture sessions, camera: Media Foundation's sensor monitor), plus the logger's registry
@@ -217,7 +227,7 @@ export default function Notch() {
   };
   const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, val, ms), ...(dlAct ? [dlAct] : []), ...(netAct ? [netAct] : [])];
   const pos = has ? Math.min(now.duration_ms, now.progress_ms + (now.playing ? ms - now.at : 0)) : 0;
-  const ly = useLyrics(has ? now.id : null, pos, now?.duration_ms);
+  const ly = useLyrics(has && !now.other ? now.id : null, pos, now?.duration_ms);
   const line = o.lyrics && playing && ly.synced && ly.i >= 0 ? ly.lines[ly.i][1] || "♪" : null;
   const vol = osd ? osdVol : null; // never 0: "{!has && vol}" would print it
 
@@ -264,6 +274,31 @@ export default function Notch() {
     ];
     return () => (clearInterval(id), offs.forEach((o) => o.then((f) => f())));
   }, []);
+  useEffect(() => {
+    if (!o.other_players) return setOther(null);
+    const flush = () => {
+      const p = otherPlay.current;
+      otherPlay.current = null;
+      if (p && opts.current.other_log && p.ms >= 30000) {
+        fetch(API + "/other/log", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ app: p.app, title: p.title, artist: p.artist, seconds: Math.round(p.ms / 1000) }) }).catch(() => {});
+      }
+    };
+    const load = () => !hidden && invoke("media_sessions").then((list) => {
+      const s = list.find((x) => x.playing);
+      const t = Date.now(), p = otherPlay.current, key = s && s.app + "|" + s.title;
+      if (p && p.key !== key && !(s == null && t - p.last < 60000)) flush();
+      if (s) {
+        if (otherPlay.current?.key === key) (otherPlay.current.ms += t - otherPlay.current.last), (otherPlay.current.last = t);
+        else otherPlay.current = { key, app: playerName(s.app), title: s.title, artist: s.artist, ms: 0, last: t };
+      }
+      setOther(s ? { id: "other:" + key, other: true, app: playerName(s.app), name: s.title, artists: s.artist || playerName(s.app),
+        image: s.thumb, playing: true, progress_ms: s.position_ms, duration_ms: s.duration_ms, at: t } : null);
+    }).catch(() => {});
+    load();
+    const id = setInterval(load, 1500);
+    return () => (clearInterval(id), flush());
+  }, [o.other_players]);
   const fast = open || (playing && ly.synced);
   useEffect(() => {
     const id = setInterval(() => !hidden && tick((x) => x + 1), fast ? 250 : 1000);
@@ -272,6 +307,10 @@ export default function Notch() {
   useEffect(() => {
     if (!now?.id) return;
     setMeta(null);
+    if (now.other) {
+      lastId.current = now.id;
+      return;
+    }
     const p = new URLSearchParams({ id: now.id, name: now.name || "", artist: now.artists || "" });
     get(`/song-plays?${p}`).then((t) => setMeta({ plays: t.plays, first: t.first })).catch(() => setMeta(null));
     if (lastId.current && now.id !== lastId.current && opts.current.peek) {
@@ -292,7 +331,7 @@ export default function Notch() {
     if (open && on("outputs")) loadOuts();
   }, [open]);
   useEffect(() => {
-    if (open && has) get("/upnext").then(setUp).catch(() => {});
+    if (open && has && !now.other) get("/upnext").then(setUp).catch(() => {});
     if (open) setVolume({}); // read Spotify's volume; its mixer row only exists once it has played sound
   }, [open, now?.id]);
   useEffect(() => {
@@ -486,7 +525,7 @@ export default function Notch() {
     const b = e.currentTarget.getBoundingClientRect();
     setVolume({ set: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)) });
   };
-  const openStats = () => (invoke("open_stats"), has && emitTo("stats", "open-detail", { kind: "track", id: now.id }));
+  const openStats = () => (invoke("open_stats"), has && !now.other && emitTo("stats", "open-detail", { kind: "track", id: now.id }));
 
   const viz = (n) => o.viz && (
     <i className={"viz" + (playing ? " on" : "") + (live ? " live" : "")}>
@@ -497,7 +536,7 @@ export default function Notch() {
   const volBar = vol && (
     <div className="n-vol"><Icon d={vol.muted ? "mute" : vol.spotify ? "spotify" : "speaker"} /><div className="n-bar"><div style={{ width: (vol.muted ? 0 : vol.level * 100) + "%" }} /></div><span>{vol.muted ? "Off" : Math.round(vol.level * 100)}</span></div>
   );
-  const badge = meta && (meta.plays === 0
+  const badge = now?.other ? <em className="n-chip">{now.app}</em> : meta && (meta.plays === 0
     ? <em className="n-chip new">First listen</em>
     : <em className="n-chip">Play #{meta.plays + 1}{meta.first ? ` · since ${since(meta.first)}` : ""}</em>);
   const act = alerts[0], bare = o.idle === "time" || o.idle === "hide";
@@ -621,17 +660,19 @@ export default function Notch() {
     music: has && (
       <div className="n-music">
         <div className="n-row">
-          <button className="n-art" title="Open in Spotify" onClick={() => invoke("open_spotify", { id: now.id })}>
-            {cover("n-cover")}<span className="n-sp"><Icon d="spotify" /></span>
+          <button className="n-art" title={now.other ? now.app : "Open in Spotify"} onClick={() => !now.other && invoke("open_spotify", { id: now.id })}>
+            {cover("n-cover")}{!now.other && <span className="n-sp"><Icon d="spotify" /></span>}
           </button>
           <div className="n-info"><b>{now.name}</b><span>{now.artists}</span>{badge}</div>
           {viz(5)}
         </div>
-        <div className="n-prog">
-          <span>{clock(pos)}</span>
-          <div className="n-bar"><div style={{ width: (pos / now.duration_ms) * 100 + "%" }} /></div>
-          <span>-{clock(now.duration_ms - pos)}</span>
-        </div>
+        {now.duration_ms > 0 && (
+          <div className="n-prog">
+            <span>{clock(pos)}</span>
+            <div className="n-bar"><div style={{ width: (pos / now.duration_ms) * 100 + "%" }} /></div>
+            <span>-{clock(now.duration_ms - pos)}</span>
+          </div>
+        )}
         <div className="n-ctl">
           <div className="n-modes">
             {up?.shuffle && <span title="Shuffle on"><Icon d="shuffle" /></span>}
@@ -642,7 +683,7 @@ export default function Notch() {
             <button className="big" onClick={() => press("play")}><Icon d={now.playing ? "pause" : "play"} /></button>
             <button onClick={() => press("next")}><Icon d="next" /></button>
           </div>
-          {spot ? (
+          {spot && !now.other ? (
             <div className="n-volc" title="Spotify volume">
               <button onClick={() => setVolume({ mute: !spot.muted })} title={spot.muted ? "Unmute" : "Mute"}><Icon d={spot.muted ? "mute" : "speaker"} /></button>
               <div className="n-slider" onPointerDown={slide} onPointerMove={slide}>
@@ -656,7 +697,7 @@ export default function Notch() {
             {lines.map((l, k) => <p key={l ? l[0] + l[1] : "e" + k} className={k === 1 && l ? "on" : ""}>{l ? l[1] || "♪" : ""}</p>)}
           </div>
         )}
-        {o.music_next && up?.next?.[0] && (
+        {o.music_next && !now.other && up?.next?.[0] && (
           <div className="n-next">
             {up.next[0].image ? <img src={up.next[0].image} draggable={false} /> : <div />}
             <div><small>Up next</small><span>{up.next[0].name}<i> · {up.next[0].artists}</i></span></div>
@@ -819,7 +860,7 @@ export default function Notch() {
         {has && now.image && <img className="n-bg" src={now.image} draggable={false} />}
         <div className="n-mini">
           {kind === "music" ? <>
-            <span className="n-ring" style={{ "--p": pos / now.duration_ms }}>{cover("n-thumb")}</span>
+            <span className="n-ring" style={{ "--p": now.duration_ms ? pos / now.duration_ms : 0 }}>{cover("n-thumb")}</span>
             {volBar || <span className="n-title" key={line || now.name}>{line || now.name}</span>}
             {viz(4)}
           </> : kind === "act" ? <>
@@ -869,7 +910,7 @@ export default function Notch() {
           </> : <>
           {signin && (
             <div className="n-acts">
-              <button className="n-act n-signin" onClick={() => (now.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>
+              <button className="n-act n-signin" onClick={() => (spNow.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>
                 <span className="n-icon" style={{ color: signin.tone }}>{signin.icon}</span>
                 <span className="n-title">{signin.label}</span>
                 <b style={{ color: signin.tone }}>{signin.value}</b>
@@ -896,7 +937,7 @@ export default function Notch() {
           {!has && volBar}
           {blocks.map((b) => (b.tiles ? <div className="n-tiles" key={b.id}>{b.items}</div> : <Fragment key={b.id}>{b.el}</Fragment>))}
           <div className="n-foot">
-            {has && up?.device && <span><Icon d={up.kind} />{up.device}</span>}
+            {has && !now.other && up?.device && <span><Icon d={up.kind} />{up.device}</span>}
             <button onClick={openStats}><Icon d="chart" />Stats</button>
           </div>
           </>)}

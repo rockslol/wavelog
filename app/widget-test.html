@@ -37,6 +37,7 @@
           transformCallback: (fn) => ((window["_" + ++n] = fn), n),
           invoke: async (cmd, args) => cmd === "backdrop" ? (sent ? new ArrayBuffer(0) : ((sent = true), stripes((innerWidth + 64) >> 1, (innerHeight + 64) >> 1)))
             : cmd === "plugin:window|is_visible" ? true : cmd === "plugin:event|listen" ? ((subs[args.event] ||= []).push(args.handler), args.handler)
+            : cmd === "media_sessions" ? JSON.parse(q.get("media") || "[]")
             : ["mic_users", "camera_users", "audio_outputs", "monitors"].includes(cmd) ? [] : null,
         };
         window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };

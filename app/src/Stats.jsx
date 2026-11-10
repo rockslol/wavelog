@@ -570,6 +570,22 @@ function Movers({ c, vs, title = "Risers and fallers", news }) {
 
 const newSub = (c) => c.new.length ? c.new.slice(0, 2).map((a) => a.name).join(", ") + (c.new_artists > 2 ? ` and ${fmt(c.new_artists - 2)} more` : "") : "First time you played them";
 
+function OtherPlayers({ o }) {
+  return (
+    <section className="card">
+      <div className="head"><h3>Other players</h3><span className="hint">{hours(o.minutes)} outside Spotify</span></div>
+      <ol className="list other-list">
+        {o.top.map((x, i) => (
+          <li key={x.title + x.artist}>
+            <span className="rank">{i + 1}</span>
+            <div className="meta"><div className="name">{x.title}</div><div className="sub">{[x.artist, x.app].filter(Boolean).join(" · ")} · {fmt(x.minutes)} min</div></div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function Binged({ items }) {
   const open = useContext(Open);
   return (
@@ -1099,7 +1115,7 @@ function Overview({ tab, setTab }) {
     summary: "/summary?" + q, streaks: "/streaks?" + q, days: "/days?" + q, hours: "/hours?" + q, weekdays: "/weekdays?" + q,
     tracks: `/top/tracks?${q}&limit=10`, artists: `/top/artists?${q}&limit=10`, albums: `/top/albums?${q}&limit=10`, binged: `/binged?${q}&limit=5`,
     heat: "/heat?" + q, skips: `/skips?${q}&limit=5`, daily: `/daily?${q}&limit=60`,
-    ...(range === "week" || range === "month" || range === "year" ? { compare: "/compare?" + q } : {}),
+    ...(range === "week" || range === "month" || range === "year" ? { compare: "/compare?" + q } : {}), other: "/other?" + q,
   });
   const prev = d?.summary?.prev;
   const change = (k) => (prev && prev[k] > 0 ? (d.summary[k] - prev[k]) / prev[k] : null);
@@ -1138,6 +1154,7 @@ function Overview({ tab, setTab }) {
           <div className="s4"><Top title="Top albums" items={d.albums} /></div>
           {d.compare?.had_before && <div className="s12"><Movers c={d.compare} vs={vs} news /></div>}
           {range !== "today" && d.daily.length > 0 && <div className="s12"><Daily items={d.daily} /></div>}
+          {d.other?.top.length > 0 && <div className="s12"><OtherPlayers o={d.other} /></div>}
           <div className="s6"><Binged items={d.binged} /></div>
           <div className="s6"><Skipped items={d.skips} /></div>
         </div>
@@ -1338,7 +1355,7 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Record other players": "youtube log history stats",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
 };
@@ -1574,6 +1591,8 @@ function Settings({ tab, setTab }) {
         <Row label="Alerts" hint="Focus timer, events starting soon and match results">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
         <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
+        <Row label="Other players" hint="YouTube, VLC, Apple Music and other apps show in the notch while Spotify isn't playing">{nSwitch("other_players")}</Row>
+        {n.other_players && <Row label="Record other players" hint="Adds them to an Other players list on the Overview, kept apart from your Spotify stats">{nSwitch("other_log")}</Row>}
       </section>
       <h4>Look</h4>
       <section className="card group">

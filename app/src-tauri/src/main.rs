@@ -325,6 +325,92 @@ fn audio() -> windows::core::Result<windows::Win32::Media::Audio::Endpoints::IAu
     }
 }
 
+// ---- other players: whatever shows in Windows' media flyout (YouTube in a browser, VLC, Apple Music...) ----
+
+static MEDIA_THUMBS: Mutex<Vec<(String, Option<String>)>> = Mutex::new(Vec::new());
+
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len() * 4 / 3 + 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
+fn media_thumb(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Option<String> {
+    use windows::Storage::Streams::DataReader;
+    let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
+    let size = stream.Size().ok()? as u32;
+    if size == 0 || size > 4_000_000 {
+        return None;
+    }
+    let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).ok()?).ok()?;
+    reader.LoadAsync(size).ok()?.join().ok()?;
+    let mut buf = vec![0u8; size as usize];
+    reader.ReadBytes(&mut buf).ok()?;
+    let kind = stream.ContentType().map(|c| c.to_string()).ok().filter(|c| c.starts_with("image/")).unwrap_or_else(|| "image/png".into());
+    Some(format!("data:{kind};base64,{}", b64(&buf)))
+}
+
+fn read_media() -> Vec<serde_json::Value> {
+    use windows::Media::Control::*;
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    let Ok(sessions) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().and_then(|op| op.join()).and_then(|m| m.GetSessions()) else {
+        return vec![];
+    };
+    // Windows times are 100 ns ticks since 1601.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64) * 10_000 + 116_444_736_000_000_000;
+    sessions.into_iter().filter_map(|s| {
+        let app = s.SourceAppUserModelId().ok()?.to_string();
+        if app.to_lowercase().contains("spotify") {
+            return None; // the Spotify API knows more about it
+        }
+        let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
+        let title = props.Title().ok()?.to_string();
+        if title.trim().is_empty() {
+            return None;
+        }
+        let playing = s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|st| st == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
+        let (mut pos, end, at) = s.GetTimelineProperties().map_or((0, 0, 0), |t| {
+            (t.Position().map_or(0, |x| x.Duration), t.EndTime().map_or(0, |x| x.Duration), t.LastUpdatedTime().map_or(0, |x| x.UniversalTime))
+        });
+        if playing && at > 0 {
+            pos += (now - at).max(0);
+        }
+        if end > 0 {
+            pos = pos.min(end);
+        }
+        let key = format!("{app}|{title}");
+        let cached = MEDIA_THUMBS.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+        let thumb = cached.unwrap_or_else(|| {
+            let t = media_thumb(&props);
+            let mut c = MEDIA_THUMBS.lock().unwrap();
+            c.push((key, t.clone()));
+            if c.len() > 12 {
+                c.remove(0);
+            }
+            t
+        });
+        Some(serde_json::json!({
+            "app": app, "title": title, "artist": props.Artist().map(|a| a.to_string()).unwrap_or_default(),
+            "album": props.AlbumTitle().map(|a| a.to_string()).unwrap_or_default(), "playing": playing,
+            "position_ms": pos / 10_000, "duration_ms": end / 10_000, "thumb": thumb,
+        }))
+    }).collect()
+}
+
+/// Media in other apps, in the order Windows lists them. Spotify itself is left out.
+#[tauri::command]
+async fn media_sessions() -> Vec<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(read_media).await.unwrap_or_default()
+}
+
 #[tauri::command]
 async fn volume(delta: Option<f32>, set: Option<f32>, mute: Option<bool>) -> Option<(f32, bool)> {
     let v = audio().ok()?;
@@ -1117,7 +1203,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());

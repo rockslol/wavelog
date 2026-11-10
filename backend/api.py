@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from PIL import Image
 
 import poller
@@ -235,6 +235,29 @@ async def compare(r: Range = R, year: int = None):
         up, down = movers(kind, cur, prev) if had_before else ([], [])
         out[kind] = {"up": up, "down": down}
     return out
+
+
+db.execute("CREATE TABLE IF NOT EXISTS other_plays (id INTEGER PRIMARY KEY, app TEXT, title TEXT, artist TEXT, played_at TEXT, seconds INTEGER)")
+
+
+@router.post("/other/log")
+async def other_log(play: dict = Body(...)):
+    """A play from another app (YouTube, VLC...), sent by the notch when it ends. Kept apart from the Spotify plays."""
+    seconds = int(play.get("seconds") or 0)
+    if seconds < 30 or not str(play.get("title") or "").strip():
+        return {"ok": False}
+    db.execute("INSERT INTO other_plays (app, title, artist, played_at, seconds) VALUES (?, ?, ?, ?, ?)",
+               (str(play.get("app", ""))[:200], str(play["title"])[:300], str(play.get("artist") or "")[:300], ts(time.time()), seconds))
+    return {"ok": True}
+
+
+@router.get("/other")
+async def other(r: Range = R, year: int = None):
+    a, b = span(r, year)
+    rows = q("SELECT title, artist, app, count(*) AS plays, sum(seconds) / 60 AS minutes FROM other_plays "
+             "WHERE played_at >= ? AND played_at < ? GROUP BY title, artist ORDER BY minutes DESC, plays DESC LIMIT 8", a, b)
+    total = db.execute("SELECT coalesce(sum(seconds), 0) / 60 FROM other_plays WHERE played_at >= ? AND played_at < ?", (a, b)).fetchone()[0]
+    return {"minutes": total, "top": rows}
 
 
 @router.get("/top/{kind}")
