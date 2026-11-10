@@ -258,7 +258,7 @@ fn notch_hover(app: &AppHandle) {
             if let (Ok(p), Ok(s), Ok(k), Ok(h), true) = (w.outer_position(), w.outer_size(), w.scale_factor(), w.hwnd(), visible() && w.is_visible().unwrap_or(false)) {
                 let (cx, cy, mid) = (c.x as f64, c.y as f64, p.x as f64 + s.width as f64 / 2.0);
                 inside = (cx - mid).abs() < rw * k / 2.0 && c.y >= p.y && cy < p.y as f64 + rh * k;
-                near = (cx - mid).abs() < (rw.max(200.0) / 2.0 + 40.0) * k && c.y >= p.y && cy < p.y as f64 + (rh.max(34.0) + 40.0) * k;
+                near = (cx - mid).abs() < (rw.max(200.0) / 2.0 + 90.0) * k && c.y >= p.y && cy < p.y as f64 + (rh.max(34.0) + 90.0) * k;
                 // Auto-hide: hidden while an app is under the notch's spot. Coming close isn't enough to bring it
                 // back, or it would pop up over browser tabs right when you click them. Instead, rest the mouse on
                 // the top edge of the screen for a moment; once it's out it stays while the mouse is on it.
