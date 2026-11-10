@@ -959,7 +959,8 @@ unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
     if code == HC_ACTION as i32 && VOLKEYS.load(Relaxed) && visible() {
         let k = unsafe { &*(lp as *const KBDLLHOOKSTRUCT) };
-        if matches!(k.vkCode, 0xAD..=0xAF) && k.flags & LLKHF_INJECTED == 0 {
+        // Injected presses count too: many keyboards send their media keys through their own software.
+        if matches!(k.vkCode, 0xAD..=0xAF) {
             if wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN {
                 if let Some(tx) = VOL_TX.get() {
                     let _ = tx.send(k.vkCode);
