@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
@@ -213,6 +213,10 @@ Object.assign(NAV_ICONS, {
   "s-photos": "M3 5h18v14H3zm2 2v10h14V7zm1 9 4-5 3 3 2-2 3 4z",
   "s-productivity": "M4 4h16v16H4zm2 2v12h12V6zm3.5 5.1L11 12.6l3.5-3.5 1.4 1.4-4.9 4.9-2.9-2.9z",
   "s-valorant": NAV_ICONS.valorant,
+  "s-pc": "M3 4h18v12H3zm2 2v8h14V6zM8 18h8v2H8z",
+  "s-sound": "M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2zM18.4 6a8.5 8.5 0 0 1 0 12L17 16.6a6.5 6.5 0 0 0 0-9.2z",
+  "s-accounts": "M12 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM3.5 21a8.5 8.5 0 0 1 17 0z",
+  "s-places": "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
   "s-advanced": "M3 4h18v16H3zm2 2v12h14V6zm2 2 4 4-4 4-1.4-1.4L8.2 12 5.6 9.4zM12 15h6v2h-6z",
   "s-about": "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM11 10h2v7h-2zM11 7h2v2h-2z",
 });
@@ -221,7 +225,8 @@ const NavIcon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={
 function useSettingsPage() {
   const [page, setPageRaw] = useState(() => {
     try {
-      return localStorage.getItem("settingsPage") || "widgets";
+      const v = localStorage.getItem("settingsPage");
+      return OLD_PAGES[v] || (PAGES.some(([id]) => id === v) ? v : "widgets");
     } catch {
       return "widgets";
     }
@@ -247,6 +252,10 @@ function Sidebar({ tab, setTab, detail }) {
   const [page, setPage] = useSettingsPage();
   const up = useUpdate();
   const inSettings = tab === "settings" && !detail;
+  const lfS = usePoll(inSettings ? "/lastfm" : null, 30000);
+  const stS = usePoll(inSettings ? "/steam" : null, 60000);
+  const accs = accountStates(now, lfS, stS);
+  const accOk = accs.filter(([, st]) => st === "ok").length, accBad = accs.some(([, st]) => st === "bad");
   const auth = now?.auth && now.auth !== "ok" ? now.auth : null;
   const last = useRef("overview");
   if (tab !== "settings") last.current = tab;
@@ -258,16 +267,22 @@ function Sidebar({ tab, setTab, detail }) {
   return (
     <aside className="side">
       <div className="brand"><span className="logo"><i /><i /><i /></span><b>Wavelog</b></div>
-      <Search />
+      {inSettings ? <SettingsSearch setPage={setPage} /> : <Search />}
       {inSettings ? (
         <nav className="side-settings" key="settings">
           <button className="side-back" onClick={() => setTab(last.current)} title="Back">
             <NavIcon d="back" /><span>Settings</span>
           </button>
-          {PAGES.map(([id, name]) => (
-            <button key={id} className={page === id ? "on" : ""} onClick={() => setPage(id)} title={name}>
-              <NavIcon d={"s-" + id} /><span>{name}</span>
-            </button>
+          {PAGE_GROUPS.map(([group, list]) => (
+            <Fragment key={group}>
+              <div className="side-group">{group}</div>
+              {list.map(([id, name]) => (
+                <button key={id} className={page === id ? "on" : ""} onClick={() => setPage(id)} title={name}>
+                  <NavIcon d={"s-" + id} /><span>{name}</span>
+                  {id === "accounts" && <em className={"side-count" + (accBad ? " bad" : "")} title={`${accOk} of ${accs.length} connected`}>{accOk}/{accs.length}</em>}
+                </button>
+              ))}
+            </Fragment>
           ))}
         </nav>
       ) : (
@@ -282,7 +297,7 @@ function Sidebar({ tab, setTab, detail }) {
             <div className="sub">{auth === "no_client_id" ? "Add your Spotify Client ID" : "Plays aren't being recorded"}</div>
           </div>
           <button className="pill" onClick={() => (auth === "no_client_id"
-            ? (setTab("settings"), setPage("general"))
+            ? (setTab("settings"), setPage("accounts"))
             : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>{auth === "no_client_id" ? "Set up" : "Sign in"}</button>
         </div>
       )}
@@ -1215,9 +1230,151 @@ export const Switch = ({ on, onChange }) => (
   <button className={"switch" + (on ? " on" : "")} role="switch" aria-checked={on} onClick={onChange}><span /></button>
 );
 
-const PAGES = [["general", "General"], ["widgets", "Widgets"], ["notch", "Notch"], ["look", "Appearance"], ["weather", "Weather"], ["calendar", "Calendar"],
-  ["photos", "Photos"], ["productivity", "Productivity"], ["valorant", "Valorant"],
-  ["advanced", "Advanced"], ["about", "About"]];
+const PAGE_GROUPS = [
+  ["App", [["general", "General"], ["look", "Appearance"]]],
+  ["On screen", [["widgets", "Widgets"], ["notch", "Notch"], ["pc", "Your PC"], ["sound", "Sound"]]],
+  ["Connected", [["accounts", "Accounts"], ["valorant", "Valorant"], ["places", "Calendar & photos"]]],
+  ["More", [["productivity", "Productivity"], ["advanced", "Advanced"], ["about", "About"]]],
+];
+const PAGES = PAGE_GROUPS.flatMap(([, list]) => list);
+const OLD_PAGES = { weather: "places", calendar: "places", photos: "places" };
+const PAGE_INFO = {
+  general: "Startup, shortcuts and your data",
+  look: "How the glass widgets look and behave",
+  widgets: "Which widgets are on your desktop, how big, and which stay over games",
+  notch: "The pill at the top of the screen and its dashboard",
+  pc: "What the notch tells you about your PC: mic and camera, screenshots, downloads, notifications and the file shelf",
+  sound: "Spotify gets quieter on its own during calls, videos and games",
+  accounts: "Spotify, Last.fm and Steam, and whether each one works",
+  valorant: "The tracker, the Tab panel in matches and the widget",
+  places: "Weather, calendars and photos for the widgets and the notch",
+  productivity: "Countdowns, to-dos, the note and the focus timer",
+  advanced: "Status, logs and fixes for when something's off",
+  about: "Version, updates and where to report problems",
+};
+
+// Spotify / Last.fm / Steam: "ok" (working), "idle" (not set up) or "bad" (signed out, wrong key).
+const accountStates = (now, lf, st) => [
+  ["Spotify", !now ? "idle" : now.auth === "ok" || !now.auth ? "ok" : now.auth === "no_client_id" ? "idle" : "bad"],
+  ["Last.fm", !lf?.connected ? "idle" : lf.error ? "bad" : "ok"],
+  ["Steam", !st?.connected ? "idle" : st.error ? "bad" : "ok"],
+];
+
+// Settings search. The index is read from the pages themselves (every Row, field and section title), so it never
+// goes stale; Advanced and About are their own components, so they're listed by hand. WORDS adds other ways to say it.
+const WORDS = {
+  "Start with Windows": "startup boot autostart", "Show or hide widgets": "hotkey shortcut keyboard", "Export plays to CSV": "excel spreadsheet download data",
+  "Glass tint": "dark transparent opacity", "Widget size": "scale bigger smaller zoom", "Lock positions": "move drag snap",
+  "Hide over apps": "autohide auto-hide", "Volume pop-up": "osd", "Accent colour": "color", "Album colour glass": "color cover",
+  "Open with": "hover click", "Layout": "edit arrange reorder sections dashboard", "Over games": "overlay fullscreen game",
+  "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
+  "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
+  "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level",
+  "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
+  "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
+};
+const EXTRA = [
+  ["advanced", "Status", "Logger", "Restart it, version and port"], ["advanced", "Status", "Database", "Back up now"],
+  ["advanced", "Status", "Data folder", "Where your plays are stored"], ["advanced", "Log", "Log", "Warnings and errors"],
+  ["advanced", "Developer", "Developer tools", "Inspect this window"], ["advanced", "Developer", "Detailed logging", "Debug"],
+  ["advanced", "Developer", "Clear caches", "Album colours, photos and weather"], ["advanced", "Developer", "Copy diagnostics", "For bug reports"],
+  ["about", "", "Updates", "Check for a new version"], ["about", "Project", "Source code", "GitHub"],
+  ["about", "Project", "Report a problem", "Bug, issue"], ["about", "Project", "License", "MIT"],
+].map(([page, sec, label, hint]) => ({ page, sec, label, hint }));
+const textOf = (x) => (x == null || typeof x === "boolean" ? "" : typeof x !== "object" ? String(x)
+  : Array.isArray(x) ? x.map(textOf).join("") : textOf(x.props?.children));
+function collect(el, page, out, sec) {
+  if (el == null || typeof el !== "object") return sec;
+  if (Array.isArray(el)) {
+    for (const c of el) sec = collect(c, page, out, sec);
+    return sec;
+  }
+  const p = el.props || {};
+  if (el.type === "h4") return textOf(p.children);
+  if (el.type === Row) {
+    const label = textOf(p.label);
+    if (label) out.push({ page, sec, label, hint: textOf(p.hint) });
+    return sec;
+  }
+  if (p.className === "field") {
+    const label = textOf([].concat(p.children).find((k) => k?.type === "span"));
+    if (label) out.push({ page, sec, label, hint: "" });
+    return sec;
+  }
+  collect(p.children, page, out, sec);
+  return sec;
+}
+let settingsIndex = [];
+function publishIndex(pages) {
+  const out = PAGES.map(([page, name]) => ({ page, sec: "", label: name, hint: PAGE_INFO[page], isPage: true }));
+  for (const [page] of PAGES) collect(pages[page], page, out, "");
+  settingsIndex = [...out, ...EXTRA];
+}
+function searchSettings(q) {
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const pageName = (id) => PAGES.find(([x]) => x === id)?.[1] || "";
+  const seen = new Set();
+  return settingsIndex.map((it) => {
+    const label = it.label.toLowerCase();
+    const all = [label, it.hint, it.sec, pageName(it.page), WORDS[it.label]].join(" ").toLowerCase();
+    if (!terms.every((t) => all.includes(t))) return null;
+    const score = (label.startsWith(terms[0]) ? 0 : label.includes(terms[0]) ? 1 : 2) + (it.isPage ? -0.5 : 0);
+    return { ...it, score };
+  }).filter((it) => it && !seen.has(it.page + it.label) && seen.add(it.page + it.label))
+    .sort((a, b) => a.score - b.score).slice(0, 9);
+}
+
+function SettingsSearch({ setPage }) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const input = useRef(null);
+  const hits = searchSettings(q);
+  useEffect(() => setSel(0), [q]);
+  useEffect(() => {
+    const key = (e) => {
+      const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
+      if ((e.ctrlKey && e.key.toLowerCase() === "f") || (e.key === "/" && !typing)) {
+        e.preventDefault();
+        input.current?.focus();
+        input.current?.select();
+      }
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  }, []);
+  const pick = (it) => {
+    setQ("");
+    setPage(it.page);
+    if (!it.isPage) setTimeout(() => dispatchEvent(new CustomEvent("settings-flash", { detail: it.label })), 120);
+  };
+  const pageName = (id) => PAGES.find(([x]) => x === id)?.[1];
+  const keyDown = (e) => {
+    if (e.key === "Escape") (setQ(""), e.currentTarget.blur());
+    else if (e.key === "Enter" && hits[sel]) pick(hits[sel]);
+    else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && hits.length) {
+      e.preventDefault();
+      setSel((i) => (i + (e.key === "ArrowDown" ? 1 : hits.length - 1)) % hits.length);
+    }
+  };
+  return (
+    <div className="search set-search">
+      <input ref={input} className="glass" value={q} placeholder="Search settings" onChange={(e) => setQ(e.target.value)} onKeyDown={keyDown}
+        autoComplete="off" spellCheck={false} />
+      {q.trim() && (
+        <div className="ss-results">
+          {hits.length ? hits.map((it, i) => (
+            <button key={it.page + it.label} className={"ss-item" + (i === sel ? " on" : "")} onClick={() => pick(it)} onPointerEnter={() => setSel(i)}>
+              <b><Mark text={it.label} q={q.trim().split(/\s+/)[0]} /></b>
+              <small>{it.isPage ? "Page" : [pageName(it.page), it.sec].filter(Boolean).join(" › ")}</small>
+            </button>
+          )) : <p className="ss-none">No setting matches "{q.trim()}"</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const Row = ({ label, hint, children }) => (
   <div className="row">
@@ -1287,7 +1444,9 @@ function Settings({ tab, setTab }) {
   });
   const field = (k) => ({ value: s[k] ?? "", onChange: (e) => setS({ ...s, [k]: e.target.value }), onBlur: submit });
   const steamId = usePoll("/steam/detect", 3600000);
-  const napps = usePoll(page === "notch" ? "/pc/notif-apps" : null, 10000);
+  const napps = usePoll(page === "pc" ? "/pc/notif-apps" : null, 10000);
+  const nowA = usePoll(page === "accounts" ? "/now" : null, 5000);
+  const steamD = usePoll(page === "accounts" ? "/steam" : null, 60000);
   const lines = (k) => ({ value: s[k].join("\n"), onChange: (e) => setS({ ...s, [k]: e.target.value.split("\n") }), onBlur: submit });
   const flip = (k, id) => set({ [k]: s[k].includes(id) ? s[k].filter((x) => x !== id) : [...s[k], id] });
   const slider = (k, min, max) => ({
@@ -1311,68 +1470,42 @@ function Settings({ tab, setTab }) {
   };
   const flipSection = (id) => setN({ sections: n.sections.includes(id) ? n.sections.filter((x) => x !== id) : [...n.sections, id] });
 
+  const notchOff = !s?.widgets.includes("notch") && (
+    <section className="card group">
+      <Row label="The notch is off" hint="These show up in the notch. Turn it on to use them"><Switch on={false} onChange={() => flip("widgets", "notch")} /></Row>
+    </section>
+  );
+  const acc = accountStates(nowA, lf, steamD);
   const pages = s && {
     advanced: <Advanced />,
     about: <About />,
     notch: <>
-      {!s.widgets.includes("notch") && (
-        <section className="card group">
-          <Row label="Notch" hint="Turned off. Turn it on to see your changes"><Switch on={false} onChange={() => flip("widgets", "notch")} /></Row>
-        </section>
-      )}
-      <h4>Small notch</h4>
       <section className="card group">
-        <Row label="When nothing is playing" hint={n.idle === "hide" ? "Only shows up for music, alerts and volume" : "What the notch shows when idle"}>
-          <Segmented options={[["weather", "Weather"], ["date", "Date"], ["time", "Time"], ["hide", "Hide"]]} value={n.idle} onChange={(v) => setN({ idle: v })} />
+        <Row label="Notch" hint={s.widgets.includes("notch") ? "Time, weather and what's playing at the top of the screen. Hover it for your dashboard" : "Turned off. Turn it on to see your changes"}>
+          <Switch on={s.widgets.includes("notch")} onChange={() => flip("widgets", "notch")} />
         </Row>
+        {s.widgets.includes("notch") && (
+          <Row label="Over games" hint="Stays on screen while a game is fullscreen. Set the game to Windowed Fullscreen">
+            <Switch on={s.overlay.includes("notch")} onChange={() => flip("overlay", "notch")} />
+          </Row>
+        )}
         {mons.length > 1 && (
           <Row label="Screen" hint="Which screen the notch sits on">
             <Segmented options={[["", "Main"], ...mons.filter((m) => !m[1]).map((m, i) => [m[0], `Screen ${i + 2} · ${m[2]}×${m[3]}`])]}
               value={mons.some((m) => m[0] === n.monitor && !m[1]) ? n.monitor : ""} onChange={(v) => setN({ monitor: v })} />
           </Row>
         )}
+      </section>
+      <h4>Small notch</h4>
+      <section className="card group">
+        <Row label="When nothing is playing" hint={n.idle === "hide" ? "Only shows up for music, alerts and volume" : "What the notch shows when idle"}>
+          <Segmented options={[["weather", "Weather"], ["date", "Date"], ["time", "Time"], ["hide", "Hide"]]} value={n.idle} onChange={(v) => setN({ idle: v })} />
+        </Row>
         <Row label="Hide over apps" hint="Hidden while a window is under it, so it never covers tabs or buttons. Rest the mouse on the top edge of the screen to bring it back">{nSwitch("autohide")}</Row>
         <Row label="Lyrics line" hint="The current lyric replaces the song name">{nSwitch("lyrics")}</Row>
         <Row label="Alerts" hint="Focus timer, events starting soon and match results">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
         <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
-      </section>
-      <h4>Your PC</h4>
-      <section className="card group">
-        <Row label="Mic and camera dot" hint="Orange dot while an app uses your microphone, green for the camera">{nSwitch("privacy")}</Row>
-        <Row label="Screenshots" hint="A preview drops out of the notch after Win+Shift+S or PrtSc, with Open, Show and Delete">{nSwitch("screenshots")}</Row>
-        <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
-        <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
-        <Row label="Notifications" hint="Messages from Discord, WhatsApp, Mail and other apps drop out of the notch. Click one to open it">{nSwitch("notifs")}</Row>
-        <Row label="Message text" hint="Off: only the app and the sender show, handy when you share your screen">{nSwitch("notif_text")}</Row>
-        <Row label="File shelf" hint="Drag files onto the notch to park them, then drag them out into a chat, a browser or a folder">{nSwitch("shelf")}</Row>
-        {n.shelf && (
-          <Row label="Clear the shelf after" hint="Only the shelf is cleared. The files stay where they are">
-            <Segmented options={[[1, "1 hour"], [24, "1 day"], [168, "1 week"], [0, "Never"]]} value={n.shelf_expire} onChange={(v) => setN({ shelf_expire: v })} />
-          </Row>
-        )}
-      </section>
-      {n.notifs && napps?.length > 0 && <>
-        <h4>Notifications from</h4>
-        <section className="card group">
-          {napps.map((a) => (
-            <Row key={a.aumid} label={a.name}>
-              <Switch on={!n.notif_mute.includes(a.aumid)}
-                onChange={() => setN({ notif_mute: n.notif_mute.includes(a.aumid) ? n.notif_mute.filter((x) => x !== a.aumid) : [...n.notif_mute, a.aumid] })} />
-            </Row>
-          ))}
-        </section>
-        <p className="hint foot-note">Apps show up here once they've sent a notification. Windows still shows its own pop-up too: to keep only the notch, open Windows Settings → System → Notifications, pick the app and turn off "Show notification banners" (leave notifications on).</p>
-      </>}
-      <h4>Spotify volume</h4>
-      <section className="card group">
-        <Row label="Lower during calls" hint="While Discord, Teams, Zoom or a browser call uses your mic">{nSwitch("duck_calls")}</Row>
-        <Row label="Lower while a video plays" hint="YouTube, Twitch and other sound from a browser or video player for more than 2 seconds">{nSwitch("duck_videos")}</Row>
-        <Row label="Lower in Valorant matches" hint="From the start of a match until you're back in the menu">{nSwitch("duck_valorant")}</Row>
-        <Row label="Lower in other games" hint="While any fullscreen game is in front">{nSwitch("duck_games")}</Row>
-        <Row label="Lower to" hint="Of Spotify's own volume. It fades back afterwards; move the volume yourself and it stays where you put it">
-          <Segmented options={[[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]]} value={n.duck_level} onChange={(v) => setN({ duck_level: v })} />
-        </Row>
       </section>
       <h4>Look</h4>
       <section className="card group">
@@ -1388,8 +1521,6 @@ function Settings({ tab, setTab }) {
           <Segmented options={[["hover", "Hover"], ["click", "Click"]]} value={n.open} onChange={(v) => setN({ open: v })} />
         </Row>
         <Row label="Scroll for volume" hint="Scroll on the notch to change Spotify's volume (not the PC's)">{nSwitch("scroll")}</Row>
-      </section>
-      <section className="card group">
         <Row label="Layout" hint={s.widgets.includes("notch") ? "Opens the notch so you can drag things around, remove them and add more, like a phone home screen"
           : "Turn the notch on first"}>
           <button className="primary" disabled={!s.widgets.includes("notch")} onClick={() => emitTo("notch", "edit", true)}>Edit notch</button>
@@ -1413,35 +1544,89 @@ function Settings({ tab, setTab }) {
       </section>
       <p className="hint foot-note">Dashboard sections show top to bottom in this order. Focus timer, Next event, PC load, Listening today, Batteries and Steam friends are small boxes; next to each other they share a row of two. <button className="link" onClick={() => setN(NOTCH)}>Reset the notch</button></p>
     </>,
+    pc: <>
+      {notchOff}
+      <section className="card group">
+        <Row label="Mic and camera dot" hint="Orange dot while an app uses your microphone, green for the camera">{nSwitch("privacy")}</Row>
+        <Row label="Screenshots" hint="A preview drops out of the notch after Win+Shift+S or PrtSc, with Open, Show and Delete">{nSwitch("screenshots")}</Row>
+        <Row label="Downloads" hint="Speed while a browser downloads, then the file when it's done">{nSwitch("downloads")}</Row>
+        <Row label="Battery alerts" hint="Controllers, headsets and Logitech mice and keyboards: a warning at 20%, 10% and 5%">{nSwitch("battery")}</Row>
+      </section>
+      <h4>Notifications</h4>
+      <section className="card group">
+        <Row label="Notifications" hint="Messages from Discord, WhatsApp, Mail and other apps drop out of the notch. Click one to open it">{nSwitch("notifs")}</Row>
+        {n.notifs && <Row label="Message text" hint="Off: only the app and the sender show, handy when you share your screen">{nSwitch("notif_text")}</Row>}
+      </section>
+      {n.notifs && napps?.length > 0 && <>
+        <h4>Notifications from</h4>
+        <section className="card group">
+          {napps.map((a) => (
+            <Row key={a.aumid} label={a.name}>
+              <Switch on={!n.notif_mute.includes(a.aumid)}
+                onChange={() => setN({ notif_mute: n.notif_mute.includes(a.aumid) ? n.notif_mute.filter((x) => x !== a.aumid) : [...n.notif_mute, a.aumid] })} />
+            </Row>
+          ))}
+        </section>
+        <p className="hint foot-note">Apps show up here once they've sent a notification. Windows still shows its own pop-up too: to keep only the notch, open Windows Settings → System → Notifications, pick the app and turn off "Show notification banners" (leave notifications on).</p>
+      </>}
+      <h4>File shelf</h4>
+      <section className="card group">
+        <Row label="File shelf" hint="Drag files onto the notch to park them, then drag them out into a chat, a browser or a folder">{nSwitch("shelf")}</Row>
+        {n.shelf && (
+          <Row label="Clear the shelf after" hint="Only the shelf is cleared. The files stay where they are">
+            <Segmented options={[[1, "1 hour"], [24, "1 day"], [168, "1 week"], [0, "Never"]]} value={n.shelf_expire} onChange={(v) => setN({ shelf_expire: v })} />
+          </Row>
+        )}
+      </section>
+    </>,
+    sound: <>
+      <h4>Spotify volume</h4>
+      <section className="card group">
+        <Row label="Lower during calls" hint="While Discord, Teams, Zoom or a browser call uses your mic">{nSwitch("duck_calls")}</Row>
+        <Row label="Lower while a video plays" hint="YouTube, Twitch and other sound from a browser or video player for more than 2 seconds">{nSwitch("duck_videos")}</Row>
+        <Row label="Lower in Valorant matches" hint="From the start of a match until you're back in the menu">{nSwitch("duck_valorant")}</Row>
+        <Row label="Lower in other games" hint="While any fullscreen game is in front">{nSwitch("duck_games")}</Row>
+        <Row label="Lower to" hint="Of Spotify's own volume. It fades back afterwards; move the volume yourself and it stays where you put it">
+          <Segmented options={[[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]]} value={n.duck_level} onChange={(v) => setN({ duck_level: v })} />
+        </Row>
+      </section>
+      <p className="hint foot-note">Switch between headphones and speakers from the notch: add Sound output to its dashboard on the Notch page.</p>
+    </>,
+    accounts: <>
+      <section className="card group">
+        <Row label={<span className="dot-label"><i className={acc[0][1]} />Spotify</span>}
+          hint={!nowA ? "Checking" : nowA.auth === "ok" ? "Signed in, plays are being recorded" : nowA.auth === "no_client_id" ? "Paste your Client ID below to start" : "Signed out. Plays aren't being recorded"}>
+          {nowA?.auth !== "no_client_id" && <button className="pill glass" onClick={() => invoke("open_url", { url: "http://127.0.0.1:8721/login" })}>{nowA?.auth === "ok" ? "Sign in again" : "Sign in"}</button>}
+        </Row>
+        <label className="field"><span>Client ID from developer.spotify.com/dashboard</span><input {...field("client_id")} placeholder="Paste your app's Client ID" /></label>
+        <div className="field"><span>Redirect URI to add in the dashboard</span><code className="mono">{s.redirect}</code></div>
+      </section>
+      <section className="card group">
+        <Row label={<span className="dot-label"><i className={acc[1][1]} />Last.fm</span>}
+          hint={!lf?.connected ? "Not connected. Imports every scrobble into your stats" : lf.running ? lf.phase || "Starting" : lf.error ? lf.error : `${fmt(lf.plays)} plays from Last.fm · ${lfDone(lf)}`}>
+          {lf?.connected && <button className="pill glass" disabled={lf.running} onClick={() => importLastfm(!lf.last_run)}>{lf.last_run ? "Sync now" : "Import"}</button>}
+        </Row>
+        {lf?.running && <Row label="Importing" hint={lfProgress(lf)} />}
+        {lf?.running && <div className="lf-bar"><div style={{ width: (lf.total ? (lf.done / lf.total) * 100 : 3) + "%" }} /></div>}
+        <label className="field"><span>Last.fm username</span><input {...field("lastfm_user")} placeholder="Your Last.fm username" /></label>
+        <label className="field"><span>API key, make one free at last.fm/api/account/create</span><input {...field("lastfm_key")} placeholder="32 letters and numbers" /></label>
+      </section>
+      <p className="hint foot-note">Adds every scrobble to your stats, matched to Spotify songs. Plays you already have are skipped, so nothing counts twice. After the first import it syncs new scrobbles every 30 minutes, including from your phone while this PC was off.</p>
+      <section className="card group">
+        <Row label={<span className="dot-label"><i className={acc[2][1]} />Steam</span>}
+          hint={!steamD?.connected ? "Not connected. Recent games, achievements and friends online" : steamD.error ? steamD.error
+            : `Signed in as ${steamD.me?.name || "you"}${steamD.private ? " · friends list is private" : ""}`} />
+        <label className="field"><span>Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)</span><input {...field("steam_key")} placeholder="32 letters and numbers" /></label>
+        <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
+      </section>
+      <p className="hint foot-note">Steam shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings. Valorant needs no account: it reads the Riot Client on this PC.</p>
+    </>,
     general: <>
       <section className="card group">
         {boot !== null && <Row label="Start with Windows" hint="Widgets and the logger start when you sign in"><Switch on={boot} onChange={toggleBoot} /></Row>}
         <Row label="Show or hide widgets" hint="Works anywhere, also from the tray icon"><kbd>Ctrl+Alt+S</kbd></Row>
+        <Row label="Search settings" hint="Find any setting from the box at the top of this menu"><kbd>Ctrl+F</kbd></Row>
       </section>
-      <h4>Spotify</h4>
-      <section className="card group">
-        <label className="field"><span>Client ID from developer.spotify.com/dashboard</span><input {...field("client_id")} placeholder="Paste your app's Client ID" /></label>
-        <div className="field"><span>Redirect URI to add in the dashboard</span><code className="mono">{s.redirect}</code></div>
-      </section>
-      <h4>Last.fm</h4>
-      <section className="card group">
-        <label className="field"><span>Last.fm username</span><input {...field("lastfm_user")} placeholder="Your Last.fm username" /></label>
-        <label className="field"><span>API key, make one free at last.fm/api/account/create</span><input {...field("lastfm_key")} placeholder="32 letters and numbers" /></label>
-        {lf?.connected && (
-          <Row label={lf.running ? lf.phase || "Starting" : lf.error ? "Import stopped" : `${fmt(lf.plays)} plays from Last.fm`}
-            hint={lf.running ? lfProgress(lf) : lf.error || lfDone(lf)}>
-            <button className="pill glass" disabled={lf.running} onClick={() => importLastfm(!lf.last_run)}>{lf.last_run ? "Sync now" : "Import"}</button>
-          </Row>
-        )}
-        {lf?.running && <div className="lf-bar"><div style={{ width: (lf.total ? (lf.done / lf.total) * 100 : 3) + "%" }} /></div>}
-      </section>
-      <p className="hint foot-note">Adds every scrobble to your stats, matched to Spotify songs. Plays you already have are skipped, so nothing counts twice. After the first import it syncs new scrobbles every 30 minutes, including from your phone while this PC was off.</p>
-      <h4>Steam</h4>
-      <section className="card group">
-        <label className="field"><span>Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)</span><input {...field("steam_key")} placeholder="32 letters and numbers" /></label>
-        <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
-      </section>
-      <p className="hint foot-note">Shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings.</p>
       <h4>Your data</h4>
       <section className="card group">
         <Row label="Export plays to CSV" hint={exported?.msg || "Every play, as a spreadsheet in Downloads"}>
@@ -1454,15 +1639,14 @@ function Settings({ tab, setTab }) {
     </>,
     widgets: <>
       <section className="card group">
-        {ALL.map(([id, name]) => {
+        {ALL.filter(([id]) => id !== "notch").map(([id, name]) => {
           const on = s.widgets.includes(id);
           return (
             <div className="widget-row" key={id}>
-              <Row label={name} hint={id === "notch" ? "Time, weather and what's playing at the top of the screen. Hover it for your dashboard" : undefined}><Switch on={on} onChange={() => flip("widgets", id)} /></Row>
+              <Row label={name}><Switch on={on} onChange={() => flip("widgets", id)} /></Row>
               {on && (
                 <div className="widget-opts">
-                  {id !== "notch" && <Segmented options={SIZES} value={s.sizes?.[id] || "m"} onChange={(v) => set({ sizes: { ...s.sizes, [id]: v } })} />}
-                  {id === "notch" && <button className="chip" onClick={() => setPage("notch")}>Customize</button>}
+                  <Segmented options={SIZES} value={s.sizes?.[id] || "m"} onChange={(v) => set({ sizes: { ...s.sizes, [id]: v } })} />
                   <button className={"chip" + (s.overlay.includes(id) ? " on" : "")} onClick={() => flip("overlay", id)}>Over games</button>
                 </div>
               )}
@@ -1480,7 +1664,12 @@ function Settings({ tab, setTab }) {
           </Row>
         </section>
       </>}
-      <p className="hint foot-note">Widgets sit on the desktop, under your apps. Over games keeps a widget on screen while a game is fullscreen, solid instead of glass, and clicks go through to the game. Set the game to Windowed Fullscreen (borderless).</p>
+      <section className="card group">
+        <Row label="Notch" hint={s.widgets.includes("notch") ? "On. It has its own page" : "Off. It has its own page"}>
+          <button className="pill glass" onClick={() => setPage("notch")}>Notch settings</button>
+        </Row>
+      </section>
+      <p className="hint foot-note">Widgets sit on the desktop, under your apps. Over games keeps a widget on screen while a game is fullscreen, solid instead of glass, and clicks go through to the game. Set the game to Windowed Fullscreen (borderless). Glass tint, size and snapping are under Appearance.</p>
     </>,
     look: <>
       <section className="card group">
@@ -1489,23 +1678,23 @@ function Settings({ tab, setTab }) {
         </Row>
         <Row label="Widget size" hint={`${Math.round((s.scale ?? 1) * 100)}%`}><input {...slider("scale", 0.6, 1.2)} /></Row>
         <Row label="Album colour glass" hint="Now playing and Lyrics take the colour of the cover"><Switch on={s.cover_glass} onChange={() => set({ cover_glass: !s.cover_glass })} /></Row>
-        <Row label="Lyrics in Now playing"><Switch on={s.now_lyrics} onChange={() => set({ now_lyrics: !s.now_lyrics })} /></Row>
+        <Row label="Lyrics in Now playing" hint="The current line under the song on the Now playing widget"><Switch on={s.now_lyrics} onChange={() => set({ now_lyrics: !s.now_lyrics })} /></Row>
         <Row label="Lock positions" hint="Off: drag widgets, they snap to each other and the screen edge"><Switch on={s.locked} onChange={() => set({ locked: !s.locked })} /></Row>
       </section>
+      <p className="hint foot-note">The notch has its own colours and glow on the Notch page.</p>
     </>,
-    weather: <>
+    places: <>
+      <h4>Weather</h4>
       <section className="card group">
         <label className="field"><span>City{s.place ? ` · showing ${s.place}` : ""}</span><input {...field("city")} placeholder="Budapest" /></label>
         <Row label="Units"><Segmented options={[["c", "°C"], ["f", "°F"]]} value={s.fahrenheit ? "f" : "c"} onChange={(v) => set({ fahrenheit: v === "f" })} /></Row>
       </section>
-    </>,
-    calendar: <>
+      <h4>Calendar</h4>
       <section className="card group">
         <label className="field"><span>Calendar links (.ics or webcal), one per line</span><textarea rows={4} {...lines("calendars")} /></label>
       </section>
       <p className="hint foot-note">iPhone: Calendar, Calendars, ⓘ next to a calendar, Public Calendar, Share Link.</p>
-    </>,
-    photos: <>
+      <h4>Photos</h4>
       <section className="card group">
         <label className="field"><span>iCloud shared album link</span><input {...field("album")} placeholder="https://www.icloud.com/sharedalbum/#..." /></label>
         <label className="field"><span>Or a folder on this PC</span><input {...field("folder")} placeholder="D:\Pictures\Favourites" /></label>
@@ -1550,13 +1739,30 @@ function Settings({ tab, setTab }) {
         <Row label="Tab panel height" hint={`${Math.round((s.tab_y ?? 0.7) * 100)}% down the screen, centred. Raise it for Skirmish, lower it for 5v5`}>
           <input {...slider("tab_y", 0.3, 0.9)} value={s.tab_y ?? 0.7} />
         </Row>
-        <Row label="Valorant widget" hint="Turn it on in Widgets, and Over games to keep it up in a match">
+        <Row label="Valorant widget" hint={s.widgets.includes("valorant") ? "On. Size and Over games are under Widgets" : "Turn it on under Widgets, with Over games to keep it up in a match"}>
           <button className="pill glass" onClick={() => setPage("widgets")}>Widgets</button>
         </Row>
       </section>
       <p className="hint foot-note">Uses the same unofficial Riot endpoints as other desktop trackers, only for your own account. It never touches the game, but a patch can break it.</p>
     </>,
   };
+  useEffect(() => {
+    if (pages) publishIndex(pages);
+  });
+  useEffect(() => {
+    const f = (e) => {
+      const want = e.detail.toLowerCase();
+      const el = [...document.querySelectorAll(".set-page .row-label, .set-page .field > span, .set-page h4")]
+        .find((x) => x.textContent.toLowerCase().startsWith(want))?.closest(".row, .field, h4");
+      if (!el) return;
+      window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 140, behavior: "smooth" });
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    };
+    addEventListener("settings-flash", f);
+    return () => removeEventListener("settings-flash", f);
+  }, []);
   return (
     <>
       <Header tab={tab} setTab={setTab} title={PAGES.find((p) => p[0] === page)?.[1] || "Settings"}>
@@ -1570,6 +1776,7 @@ function Settings({ tab, setTab }) {
             ))}
           </nav>
           <div className="set-page" key={page}>
+            {PAGE_INFO[page] && <p className="page-desc">{PAGE_INFO[page]}</p>}
             {pages[page]}
           </div>
         </div>
