@@ -53,16 +53,16 @@ export function useLyrics(id, pos, duration) {
 }
 
 export const NOTCH_SECTIONS = [["clock", "Clock and weather"], ["music", "Music"], ["timer", "Focus timer"], ["calendar", "Next event"],
-  ["pc", "PC load"], ["listening", "Listening today"], ["devices", "Batteries"], ["outputs", "Sound output"], ["downloads", "Downloads"], ["shelf", "File shelf"], ["notifications", "Notifications"], ["todos", "To do"],
+  ["pc", "PC load"], ["listening", "Listening today"], ["devices", "Batteries"], ["outputs", "Sound output"], ["mixer", "Volume mixer"], ["brightness", "Brightness"], ["downloads", "Downloads"], ["shelf", "File shelf"], ["notifications", "Notifications"], ["todos", "To do"],
   ["valorant", "Last Valorant match"], ["steam", "Steam friends"]];
 export const NOTCH = {
   idle: "weather", open: "hover", autohide: true, monitor: "", lyrics: true, viz: true, glow: true, accent: "album", peek: true, osd: true, scroll: true, alerts: true,
-  privacy: true, downloads: true, screenshots: true, battery: true, notifs: true, notif_text: true, notif_mute: [], shelf: true, shelf_expire: 24, music_lyrics: true, music_next: true, net_speed: true, offline: true, steam_sales: true, other_players: true, other_log: false,
+  privacy: true, downloads: true, screenshots: true, battery: true, notifs: true, notif_text: true, notif_mute: [], shelf: true, shelf_expire: 24, music_lyrics: true, music_next: true, net_speed: true, offline: true, steam_sales: true, other_players: true, other_log: false, replace_osd: false,
   duck_calls: true, duck_videos: true, duck_valorant: true, duck_games: false, duck_level: 0.25,
-  sections: NOTCH_SECTIONS.map(([id]) => id), v: 6,
+  sections: NOTCH_SECTIONS.map(([id]) => id), v: 7,
 };
 // Dashboard sections added by later versions; layouts saved before that get them once.
-const ADDED = [[2, ["devices", "downloads"]], [3, ["outputs"]], [4, ["steam"]], [5, ["notifications"]], [6, ["shelf"]]];
+const ADDED = [[2, ["devices", "downloads"]], [3, ["outputs"]], [4, ["steam"]], [5, ["notifications"]], [6, ["shelf"]], [7, ["mixer", "brightness"]]];
 export const notchOptions = (s) => {
   const n = { ...NOTCH, ...(s?.notch || {}) };
   if (s?.notch?.sections) {

@@ -38,6 +38,8 @@
           invoke: async (cmd, args) => cmd === "backdrop" ? (sent ? new ArrayBuffer(0) : ((sent = true), stripes((innerWidth + 64) >> 1, (innerHeight + 64) >> 1)))
             : cmd === "plugin:window|is_visible" ? true : cmd === "plugin:event|listen" ? ((subs[args.event] ||= []).push(args.handler), args.handler)
             : cmd === "media_sessions" ? JSON.parse(q.get("media") || "[]")
+            : cmd === "volume" ? [0.36, false] : cmd === "mixer" ? [["chrome.exe", 0.8, false], ["Discord.exe", 0.45, false], ["Spotify.exe", 1, true]]
+            : cmd === "brightness" ? [["DELL U2723QE", 70], ["Generic PnP Monitor", 40]]
             : ["mic_users", "camera_users", "audio_outputs", "monitors"].includes(cmd) ? [] : null,
         };
         window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };

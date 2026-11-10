@@ -228,7 +228,10 @@ fn monitors(app: AppHandle) -> Vec<(String, bool, u32, u32)> {
 }
 
 #[tauri::command]
-fn notch(w: f64, h: f64, autohide: Option<bool>, drops: Option<bool>) {
+fn notch(w: f64, h: f64, autohide: Option<bool>, drops: Option<bool>, volkeys: Option<bool>) {
+    if let Some(v) = volkeys {
+        VOLKEYS.store(v, Relaxed);
+    }
     *NOTCH.lock().unwrap() = (w, h);
     if let Some(a) = autohide {
         NOTCH_AUTOHIDE.store(a, Relaxed);
@@ -944,6 +947,169 @@ fn viz_audio(app: &AppHandle) {
     }
 }
 
+// ---- volume keys, mixer and screen brightness for the notch ----
+
+// Windows 11 has no switch to hide its volume pop-up, so when asked, the volume keys are taken over: a low-level
+// keyboard hook swallows them and a worker thread changes the volume instead, which the notch shows. The hook only
+// passes the key on; it never waits on anything, and Windows drops a hook that stops answering, so the keys can't get stuck.
+static VOLKEYS: AtomicBool = AtomicBool::new(false);
+static VOL_TX: OnceLock<std::sync::mpsc::Sender<u32>> = OnceLock::new();
+
+unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    if code == HC_ACTION as i32 && VOLKEYS.load(Relaxed) && visible() {
+        let k = unsafe { &*(lp as *const KBDLLHOOKSTRUCT) };
+        if matches!(k.vkCode, 0xAD..=0xAF) && k.flags & LLKHF_INJECTED == 0 {
+            if wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN {
+                if let Some(tx) = VOL_TX.get() {
+                    let _ = tx.send(k.vkCode);
+                }
+            }
+            return 1;
+        }
+    }
+    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wp, lp) }
+}
+
+fn volume_keys() {
+    let (tx, rx) = std::sync::mpsc::channel::<u32>();
+    let _ = VOL_TX.set(tx);
+    thread::spawn(move || {
+        for vk in rx {
+            let Ok(v) = audio() else { continue };
+            unsafe {
+                let _ = match vk {
+                    0xAF => v.VolumeStepUp(std::ptr::null()),
+                    0xAE => v.VolumeStepDown(std::ptr::null()),
+                    _ => v.SetMute(!v.GetMute().map(|m| m.as_bool()).unwrap_or(false), std::ptr::null()),
+                };
+            }
+        }
+    });
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        let module = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+        if SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), module, 0).is_null() {
+            return;
+        }
+        let mut msg = std::mem::zeroed();
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
+    }
+}
+
+/// Apps playing on the default output right now: (exe name, volume 0-1, muted), one row per app.
+#[tauri::command]
+async fn mixer() -> Vec<(String, f32, bool)> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut out: Vec<(String, f32, bool)> = vec![];
+        for (name, v) in app_sessions() {
+            if !out.iter().any(|(n, ..)| *n == name) {
+                if let (Ok(l), Ok(m)) = unsafe { (v.GetMasterVolume(), v.GetMute()) } {
+                    out.push((name, l, m.as_bool()));
+                }
+            }
+        }
+        out
+    }).await.unwrap_or_default()
+}
+
+#[tauri::command]
+async fn set_app_volume(app: String, level: Option<f32>, mute: Option<bool>) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut hit = false;
+        for (name, v) in app_sessions() {
+            if name.eq_ignore_ascii_case(&app) {
+                hit = true;
+                unsafe {
+                    if let Some(l) = level {
+                        let _ = v.SetMasterVolume(l.clamp(0.0, 1.0), std::ptr::null());
+                        let _ = v.SetMute(false, std::ptr::null());
+                    }
+                    if let Some(m) = mute {
+                        let _ = v.SetMute(m, std::ptr::null());
+                    }
+                }
+            }
+        }
+        hit
+    }).await.unwrap_or(false)
+}
+
+/// Active audio sessions on the default output, with the app's exe name. System sounds (pid 0) are left out.
+fn app_sessions() -> Vec<(String, windows::Win32::Media::Audio::ISimpleAudioVolume)> {
+    use windows::core::Interface;
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let Ok(e) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return vec![] };
+        let Ok(d) = e.GetDefaultAudioEndpoint(eRender, eConsole) else { return vec![] };
+        let Ok(list) = d.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None).and_then(|m| m.GetSessionEnumerator()) else { return vec![] };
+        (0..list.GetCount().unwrap_or(0))
+            .filter_map(|i| {
+                let s = list.GetSession(i).ok()?;
+                if !matches!(s.GetState(), Ok(st) if st == AudioSessionStateActive) {
+                    return None;
+                }
+                let pid = s.cast::<IAudioSessionControl2>().ok()?.GetProcessId().ok()?;
+                let name = exe_name(pid);
+                if pid == 0 || name.is_empty() {
+                    return None;
+                }
+                Some((name, s.cast::<ISimpleAudioVolume>().ok()?))
+            })
+            .collect()
+    }
+}
+
+/// Screens that take brightness over DDC/CI (most external monitors; laptop panels don't): (name, brightness 0-100).
+/// `set` = (index in this list, 0-100). DDC is slow, about 50 ms a call, so it runs off the main thread.
+#[tauri::command]
+async fn brightness(set: Option<(usize, u32)>) -> Vec<(String, u32)> {
+    tauri::async_runtime::spawn_blocking(move || ddc(set)).await.unwrap_or_default()
+}
+
+fn ddc(set: Option<(usize, u32)>) -> Vec<(String, u32)> {
+    use windows_sys::Win32::{Devices::Display::*, Graphics::Gdi::*};
+    unsafe extern "system" fn add(h: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> windows_sys::Win32::Foundation::BOOL {
+        unsafe { (*(data as *mut Vec<HMONITOR>)).push(h) };
+        1
+    }
+    let mut out = vec![];
+    unsafe {
+        let mut mons: Vec<HMONITOR> = vec![];
+        EnumDisplayMonitors(std::ptr::null_mut(), std::ptr::null(), Some(add), &mut mons as *mut _ as LPARAM);
+        for hm in mons {
+            let mut n = 0u32;
+            if GetNumberOfPhysicalMonitorsFromHMONITOR(hm, &mut n) == 0 || n == 0 {
+                continue;
+            }
+            let mut phys: Vec<PHYSICAL_MONITOR> = vec![std::mem::zeroed(); n as usize];
+            if GetPhysicalMonitorsFromHMONITOR(hm, n, phys.as_mut_ptr()) == 0 {
+                continue;
+            }
+            for p in &phys {
+                let (handle, mut lo, mut cur, mut hi) = (p.hPhysicalMonitor, 0u32, 0u32, 0u32);
+                if GetMonitorBrightness(handle, &mut lo, &mut cur, &mut hi) == 0 || hi <= lo {
+                    continue;
+                }
+                if let Some((i, v)) = set {
+                    if i == out.len() {
+                        let want = lo + (hi - lo) * v.min(100) / 100;
+                        if SetMonitorBrightness(handle, want) != 0 {
+                            cur = want;
+                        }
+                    }
+                }
+                let desc = p.szPhysicalMonitorDescription; // packed struct: copy fields out before borrowing
+                let name = String::from_utf16_lossy(&desc).trim_end_matches(char::from(0)).trim().to_string();
+                out.push((name, (cur - lo) * 100 / (hi - lo)));
+            }
+            DestroyPhysicalMonitors(n, phys.as_ptr());
+        }
+    }
+    out
+}
+
 fn notch_audio(app: &AppHandle) {
     unsafe {
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
@@ -1166,6 +1332,7 @@ async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<
     }
     match (app.get_webview_window("notch"), list.iter().any(|(l, _)| l == "notch")) {
         (Some(w), false) => {
+            VOLKEYS.store(false, Relaxed); // no notch, no bar to show: give the keys back to Windows
             let _ = w.destroy();
         }
         (None, true) => {
@@ -1348,7 +1515,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());
@@ -1396,6 +1563,7 @@ fn main() {
             thread::spawn(move || notch_audio(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || viz_audio(&handle));
+            thread::spawn(volume_keys);
             thread::spawn(camera_watch);
             thread::spawn(ducker);
             let handle = app.handle().clone();

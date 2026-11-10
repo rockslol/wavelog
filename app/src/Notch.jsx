@@ -45,6 +45,7 @@ const ICONS = {
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   wifi: "M12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM7.8 14.6a6 6 0 0 1 8.4 0l-1.4 1.4a4 4 0 0 0-5.6 0zM4.9 11.7a10 10 0 0 1 14.2 0l-1.4 1.4a8 8 0 0 0-11.4 0zM2 8.8a14 14 0 0 1 20 0l-1.4 1.4a12 12 0 0 0-17.2 0z",
   nowifi: "M3.3 2 22 20.7l-1.4 1.4-7.2-7.2A4 4 0 0 0 9.2 16l-1.4-1.4a6 6 0 0 1 3.6-1.7L9 10.5a10 10 0 0 0-4.1 2.6l-1.4-1.4A12 12 0 0 1 7.4 9L5.1 6.7A14 14 0 0 0 2 9.2L.6 7.8A16 16 0 0 1 3.6 5.2L1.9 3.4zM12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM12 5a16 16 0 0 1 11.4 4.8L22 11.2A14 14 0 0 0 10.6 7.1z",
+  sun: "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z",
   tray: "M3 13h5l1.5 2.5h5L16 13h5v7H3zM6 4h12l2.6 7H15l-1.5 2.5h-3L9 11H3.4z",
   bell: "M12 2a6 6 0 0 0-6 6v4.6L4 16v1h16v-1l-2-3.4V8a6 6 0 0 0-6-6zM10 19a2 2 0 0 0 4 0z",
   timer: "M9 2h6v2H9zM12 5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17zM12 7a6.5 6.5 0 1 1 0 13 6.5 6.5 0 1 1 0-13zM11 9.5h2v5h-2z",
@@ -82,7 +83,21 @@ const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
 const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
 const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
-  outputs: "speaker", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
+  outputs: "speaker", mixer: "speaker", brightness: "sun", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
+
+// A volume or brightness slider: drag or click anywhere on it. `every` limits how often it reports while dragging.
+function Slider({ value, onChange, every = 40 }) {
+  const last = useRef(0);
+  const move = (e) => {
+    e.stopPropagation();
+    if (e.type === "pointerdown") e.currentTarget.setPointerCapture(e.pointerId);
+    else if (!e.buttons || Date.now() - last.current < every) return;
+    last.current = Date.now();
+    const b = e.currentTarget.getBoundingClientRect();
+    onChange(Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)));
+  };
+  return <div className="n-slider" onPointerDown={move} onPointerMove={move} onClick={(e) => e.stopPropagation()}><div style={{ width: value * 100 + "%" }} /></div>;
+}
 
 function stored(key) {
   try {
@@ -145,6 +160,9 @@ export default function Notch() {
   const [micApps, setMicApps] = useState([]);
   const [camApps, setCamApps] = useState([]);
   const [outs, setOuts] = useState(null);
+  const [mix, setMix] = useState(null); // apps playing sound: [exe, volume, muted]
+  const [pcVol, setPcVol] = useState(null); // [volume, muted]
+  const [bright, setBright] = useState(null); // screens with DDC/CI: [name, 0-100]
   const [edit, setEdit] = useState(null); // section order while arranging the dashboard (Settings > Notch > Edit)
   const [dragging, setDragging] = useState(null);
   const [dropping, setDropping] = useState(0); // files being dragged over the notch
@@ -328,7 +346,13 @@ export default function Notch() {
   const loadOuts = () => invoke("audio_outputs").then(setOuts).catch(() => {});
   const realOuts = (outs || []).filter(([, n]) => !/steam streaming/i.test(n)); // Steam Remote Play's virtual devices
   useEffect(() => {
-    if (open && on("outputs")) loadOuts();
+    if (open && (on("outputs") || on("mixer"))) loadOuts();
+    if (open && on("brightness")) invoke("brightness", { set: null }).then(setBright).catch(() => {});
+    if (!open || !on("mixer")) return;
+    const load = () => (invoke("mixer").then(setMix).catch(() => {}), invoke("volume", {}).then(setPcVol).catch(() => {}));
+    load();
+    const id = setInterval(load, 1500);
+    return () => clearInterval(id);
   }, [open]);
   useEffect(() => {
     if (open && has && !now.other) get("/upnext").then(setUp).catch(() => {});
@@ -462,8 +486,8 @@ export default function Notch() {
   const miniW = vol || line ? 340 : kind !== "idle" ? 250 : o.idle === "time" ? 120 : 210;
   const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : toast.kind === "notif" ? 420 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
   useEffect(() => {
-    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit && !dropping, drops: o.shelf });
-  }, [w, h, !!bubble, state === "gone", o.autohide, !!edit, !!dropping, o.shelf]);
+    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit && !dropping, drops: o.shelf, volkeys: o.replace_osd && o.osd });
+  }, [w, h, !!bubble, state === "gone", o.autohide, !!edit, !!dropping, o.shelf, o.replace_osd, o.osd]);
   const shotDo = (id, what) => fetch(`${API}/pc/shot/${id}/${what}`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
   const stop = (e) => e.stopPropagation();
   const appIcon = (aumid) => `${API}/pc/app-icon?aumid=${encodeURIComponent(aumid)}`;
@@ -558,6 +582,8 @@ export default function Notch() {
     listening: today ? `${today.minutes} min today` : "Minutes and streak",
     devices: pcl?.battery?.[0] ? pcl.battery.map((b) => `${b.name} ${b.level == null ? b.text : b.level + "%"}`).join(" · ") : "Controllers, headsets, mice",
     outputs: outNow ? outName(outNow[1])[0] : "Headphones or speakers",
+    mixer: pcVol ? `PC ${Math.round(pcVol[0] * 100)}%${mix?.length ? ` · ${mix.length} ${mix.length === 1 ? "app" : "apps"}` : ""}` : "PC and app volume",
+    brightness: bright?.length ? `${bright.length} ${bright.length === 1 ? "screen" : "screens"}` : "Screens that take DDC/CI",
     downloads: dls?.active?.length ? `${dls.active.length} downloading` : "While a browser downloads",
     notifications: notifList.length ? `${notifList.length} from today` : "Messages from your apps",
     shelf: shelf.length ? `${shelf.length} on the shelf` : "Drag files onto the notch",
@@ -775,6 +801,44 @@ export default function Notch() {
             );
           })}
         </div>
+      </div>
+    ),
+    mixer: pcVol && (
+      <div className="n-mixer">
+        <div className="n-th"><Icon d="speaker" />Volume{outNow && <em>{outName(outNow[1])[0]}</em>}</div>
+        <div className="n-mrow">
+          <button title={pcVol[1] ? "Unmute" : "Mute"} onClick={(e) => (stop(e), invoke("volume", { mute: !pcVol[1] }).then(setPcVol))}><Icon d={pcVol[1] ? "mute" : "speaker"} /></button>
+          <span>PC</span>
+          <Slider value={pcVol[1] ? 0 : pcVol[0]} onChange={(v) => (setPcVol([v, false]), invoke("volume", { set: v }))} />
+          <b>{pcVol[1] ? "Off" : Math.round(pcVol[0] * 100)}</b>
+        </div>
+        {(mix || []).map(([app, l, m]) => (
+          <div key={app} className="n-mrow">
+            <button title={m ? "Unmute" : "Mute"} onClick={(e) => (stop(e), setMix((x) => x.map((r) => (r[0] === app ? [app, r[1], !m] : r))), invoke("set_app_volume", { app, mute: !m }))}>
+              <Icon d={m ? "mute" : "speaker"} />
+            </button>
+            <span title={app}>{appName(app)}</span>
+            <Slider value={m ? 0 : l} onChange={(v) => (setMix((x) => x.map((r) => (r[0] === app ? [app, v, false] : r))), invoke("set_app_volume", { app, level: v }))} />
+            <b>{m ? "Off" : Math.round(l * 100)}</b>
+          </div>
+        ))}
+      </div>
+    ),
+    brightness: bright?.length > 0 && (
+      <div className="n-mixer">
+        <div className="n-th"><Icon d="sun" />Brightness</div>
+        {bright.map(([name, v], i) => (
+          <div key={i} className="n-mrow">
+            <span className="n-mic"><Icon d="sun" /></span>
+            <span title={name}>{bright.length > 1 ? `Screen ${i + 1}` : name || "Screen"}</span>
+            <Slider value={v / 100} every={150} onChange={(x) => {
+              const val = Math.round(x * 100);
+              setBright((b) => b.map((s, k) => (k === i ? [s[0], val] : s)));
+              invoke("brightness", { set: [i, val] });
+            }} />
+            <b>{v}</b>
+          </div>
+        ))}
       </div>
     ),
     downloads: dls && dls.active.length + dls.done.length > 0 && (

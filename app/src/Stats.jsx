@@ -1355,7 +1355,7 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Record other players": "youtube log history stats",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Replace Windows' volume pop-up": "osd flyout hide volume keys", "Record other players": "youtube log history stats",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
 };
@@ -1684,7 +1684,14 @@ function Settings({ tab, setTab }) {
           <Segmented options={[[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]]} value={n.duck_level} onChange={(v) => setN({ duck_level: v })} />
         </Row>
       </section>
-      <p className="hint foot-note">Switch between headphones and speakers from the notch: add Sound output to its dashboard on the Notch page.</p>
+      <h4>Volume keys</h4>
+      <section className="card group">
+        <Row label="Replace Windows' volume pop-up" hint={!n.osd ? "Turn on Volume pop-up on the Notch page first"
+          : "The volume keys show the notch's bar instead of Windows' own pop-up. In fullscreen games Windows handles them as usual"}>
+          <Switch on={n.replace_osd && n.osd} onChange={() => n.osd && setN({ replace_osd: !n.replace_osd })} />
+        </Row>
+      </section>
+      <p className="hint foot-note">Switch between headphones and speakers, change each app's volume and your screens' brightness from the notch: add Sound output, Volume mixer and Brightness to its dashboard on the Notch page.</p>
     </>,
     accounts: <>
       <section className="card group">
