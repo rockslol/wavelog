@@ -39,7 +39,7 @@ MODULES = (
 class Plugin:
     def __init__(self):
         self.jobs = []        # (fn, every, wait)
-        self.pages = {}       # id -> (fn, title, ranges)
+        self.pages = {}       # id -> (fn, title, ranges, choices)
         self.widgets = {}     # id -> (fn, title, sizes)
         self.sections = {}    # id -> (fn, title)
         self.actions = {}     # name -> fn
@@ -54,9 +54,11 @@ class Plugin:
             return fn
         return add
 
-    def page(self, title, ranges=False):
+    def page(self, title, ranges=False, choices=None):
+        """A tab in the stats window. ranges=True adds Today / 7 days / ... at the top (the handler gets `range`).
+        choices=[("all", "All modes"), ("comp", "Competitive")] adds your own switch (the handler gets `choice`)."""
         def add(fn):
-            self.pages[fn.__name__] = (fn, title, ranges)
+            self.pages[fn.__name__] = (fn, title, ranges, [list(c) for c in choices or []])
             return fn
         return add
 
@@ -72,12 +74,13 @@ class Plugin:
             return fn
         return add
 
-    def overlay(self, game, key="Tab", width=740, height=200):
+    def overlay(self, game, key="Tab", width=740, height=200, y=0.7):
         """A panel shown while `key` is held in `game` (its exe name, e.g. "VALORANT-Win64-Shipping.exe"). It's read
         each time the key goes down. The game needs Windowed Fullscreen (borderless) for anything to show over it.
-        Keys: "Tab", "Alt", "Ctrl", "Shift", "Space", "CapsLock", "F1".."F12", "A".."Z", "0".."9"."""
+        Keys: "Tab", "Alt", "Ctrl", "Shift", "Space", "CapsLock", "F1".."F12", "A".."Z", "0".."9".
+        `y` is how far down the screen it sits (0 to 1), or the key of a slider setting so the user can move it."""
         def add(fn):
-            self.overlays.append((fn, game, key, width, height))
+            self.overlays.append((fn, game, key, width, height, y))
             return fn
         return add
 
@@ -118,9 +121,10 @@ class ui:
 
     # --- Top of a page -------------------------------------------------------------------------------------------
     @staticmethod
-    def header(title, sub=None, image=None, note=None, bar=None, round=False):
-        """Big card with a picture: e.g. your rank. `bar` is 0 to 1 for a progress bar, `note` a small line under it."""
-        return _b("header", title=title, sub=sub, image=image, note=note, bar=bar, round=round or None)
+    def header(title, sub=None, image=None, note=None, bar=None, round=False, chips=None):
+        """Big card with a picture: e.g. your rank. `bar` is 0 to 1 for a progress bar, `note` a small line under it,
+        `chips` a row of ui.chip (e.g. your last results)."""
+        return _b("header", title=title, sub=sub, image=image, note=note, bar=bar, round=round or None, chips=chips)
 
     @staticmethod
     def hero(title, text=None, label=None, button=None, action=None, args=None):
@@ -147,11 +151,18 @@ class ui:
         return _b("list", title=title, hint=hint, items=items, ranked=ranked or None, empty=empty)
 
     @staticmethod
-    def item(title, sub=None, image=None, right=None, mood=None, meter=None, round=False, chips=None, action=None, args=None):
+    def item(title, sub=None, image=None, right=None, mood=None, meter=None, round=False, chips=None, strip=None, action=None, args=None):
         """A list row. `right` is a short value on the right, `mood` "up"/"down" colours it, `meter` is 0 to 1,
-        `chips` a row of small coloured marks under the text (see ui.chip)."""
+        `chips` a row of small coloured marks under the text (see ui.chip), `strip` a timeline of ui.seg bars."""
         return {k: v for k, v in dict(title=title, sub=sub, image=image, right=right, mood=mood, meter=meter, round=round or None,
-                                      chips=chips, **_act(action, args)).items() if v is not None}
+                                      chips=chips, strip=strip, **_act(action, args)).items() if v is not None}
+
+    @staticmethod
+    def seg(tone=None, level=1, faded=False, dot=False, gap=False, tip=None):
+        """One bar of a strip, e.g. a round: tone "good" (green), "bad" (red) or None (grey), level 0 to 5 (height),
+        faded, a yellow dot on top, and a gap before it."""
+        return {k: v for k, v in dict(tone=tone, level=level, faded=faded or None, dot=dot or None, gap=gap or None, tip=tip).items()
+                if v is not None}
 
     @staticmethod
     def grid(title, items, hint=None, columns=4, empty=None):

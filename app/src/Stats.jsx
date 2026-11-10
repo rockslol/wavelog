@@ -1987,10 +1987,13 @@ function PluginTab({ tab, setTab }) {
   const p = plug?.plugins.find((x) => x.id === pid);
   const pg = p?.pages.find((x) => x.id === page);
   const [range, setRange] = useState("week");
+  const [choice, setChoice] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState(false);
   const ready = !!(p && pg && p.enabled && !p.error);
-  const path = ready ? `/p/${pid}/page/${page}${pg.ranges ? "?range=" + range : ""}` : null;
+  const pick = choice ?? pg?.choices?.[0]?.[0];
+  const query = [pg?.ranges && "range=" + range, pg?.choices?.length && "choice=" + encodeURIComponent(pick)].filter(Boolean).join("&");
+  const path = ready ? `/p/${pid}/page/${page}${query ? "?" + query : ""}` : null;
   const load = () => path && get(path).then((d) => (setData(d), setError(false))).catch(() => setError(true));
   useEffect(() => {
     setData(null);
@@ -2001,6 +2004,7 @@ function PluginTab({ tab, setTab }) {
   }, [path]);
   const head = (
     <Header tab={tab} setTab={setTab} title={pg?.title || p?.name || "Plugin"}>
+      {pg?.choices?.length > 0 && <Segmented options={pg.choices} value={pick} onChange={setChoice} />}
       {pg?.ranges && <Segmented options={RANGES} value={range} onChange={setRange} />}
     </Header>
   );

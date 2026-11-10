@@ -37,7 +37,7 @@ export const unslot = (label, prefix = "p_") => {
 // What the plugins add to each place: [slot id, title, plugin, item].
 export const pluginWidgets = (d) => running(d).flatMap((p) => p.widgets.map((w) => [slot(p.id, w.id), w.title, p, w]));
 export const pluginSections = (d) => running(d).flatMap((p) => p.sections.map((s) => [slot(p.id, s.id), s.title, p, s]));
-export const pluginOverlays = (d) => running(d).flatMap((p) => p.overlays.map((o) => [`po_${p.id}_${o.id}`, o.game, o.key, o.w, o.h]));
+export const pluginOverlays = (d) => running(d).flatMap((p) => p.overlays.map((o) => [`po_${p.id}_${o.id}`, o.game, o.key, o.w, o.h, o.y ?? 0.7]));
 export function usePlugins() {
   const [d, setD] = useState(list);
   useEffect(() => {
@@ -97,6 +97,18 @@ const Chips = ({ items, run }) => (
   </div>
 );
 
+// A timeline of slim bars (e.g. a match's rounds): green good, red bad, taller = higher level, faded, yellow dot.
+const Strip = ({ segs }) => (
+  <div className="rtl">
+    {segs.map((g, i) => (
+      <i key={i} style={{ "--k": Math.min(Math.max(g.level ?? 1, 0), 5) }} title={g.tip}
+        className={(g.tone === "good" ? "W" : g.tone === "bad" ? "L" : "N") + (g.faded ? " died" : "") + (g.gap ? " half" : "")}>
+        {g.dot && <s />}
+      </i>
+    ))}
+  </div>
+);
+
 function Block({ b, run, compact }) {
   switch (b.type) {
     case "header":
@@ -106,6 +118,7 @@ function Block({ b, run, compact }) {
           <div className="grow">
             <h2>{b.title}</h2>
             {b.sub && <div className="sub">{b.sub}</div>}
+            {b.chips && <Chips items={b.chips} run={run} />}
             {b.bar != null && <div className="bar rr"><div style={{ width: Math.min(100, Math.max(0, b.bar * 100)) + "%" }} /></div>}
             {b.note && <div className="hint">{b.note}</div>}
           </div>
@@ -150,6 +163,7 @@ function Block({ b, run, compact }) {
                     <div className="name">{x.title}</div>
                     {x.sub && <div className="sub">{x.sub}</div>}
                     {x.chips && <Chips items={x.chips} run={run} />}
+                    {x.strip?.length > 0 && <Strip segs={x.strip} />}
                     {x.meter != null && <div className="meter"><div style={{ width: Math.min(100, x.meter * 100) + "%" }} /></div>}
                   </div>
                   {x.right != null && <span className={"mv pb-right" + (x.mood ? " " + x.mood : "")}>{x.right}</span>}

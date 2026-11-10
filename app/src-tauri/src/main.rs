@@ -1452,7 +1452,7 @@ fn valorant_front() -> bool {
     String::from_utf16_lossy(&t[..n]).starts_with("VALORANT")
 }
 
-fn place(h: HWND) {
+fn place(h: HWND, down: f64) {
     use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*};
     unsafe {
         let mut mi: MONITORINFO = std::mem::zeroed();
@@ -1461,7 +1461,7 @@ fn place(h: HWND) {
         let (m, mut r): (RECT, RECT) = (mi.rcMonitor, std::mem::zeroed());
         GetWindowRect(h, &mut r);
         let x = m.left + (m.right - m.left - (r.right - r.left)) / 2;
-        let y = m.top + ((m.bottom - m.top) as f64 * f64::from_bits(TAB_Y.load(Relaxed))) as i32;
+        let y = m.top + ((m.bottom - m.top) as f64 * down) as i32;
         SetWindowPos(h, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
@@ -1484,7 +1484,7 @@ fn tab_panel(app: &AppHandle) {
             if let Some(Ok(h)) = panel.as_ref().map(|w| w.hwnd()) {
                 let _ = app.emit_to("tabpanel", "visibility", down);
                 if down {
-                    place(h.0 as _);
+                    place(h.0 as _, f64::from_bits(TAB_Y.load(Relaxed)));
                 }
                 unsafe { ShowWindow(h.0 as _, if down { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
             }
@@ -1495,7 +1495,7 @@ fn tab_panel(app: &AppHandle) {
 
 // ---- Plugin overlays -----------------------------------------------------------------------------------------
 // A plugin panel shown while a key is held in a game: (window label, game exe in lowercase, virtual key, width, height).
-static OVERLAYS: Mutex<Vec<(String, String, u16, f64, f64)>> = Mutex::new(Vec::new());
+static OVERLAYS: Mutex<Vec<(String, String, u16, f64, f64, f64)>> = Mutex::new(Vec::new()); // + how far down (0-1)
 
 fn vk(key: &str) -> Option<u16> {
     let k = key.trim().to_ascii_uppercase();
@@ -1516,9 +1516,10 @@ fn vk(key: &str) -> Option<u16> {
 }
 
 #[tauri::command]
-fn set_overlays(app: AppHandle, list: Vec<(String, String, String, f64, f64)>) {
+fn set_overlays(app: AppHandle, list: Vec<(String, String, String, f64, f64, f64)>) {
     let list: Vec<_> = list.into_iter().filter(|o| plugin_label(&o.0, "po_"))
-        .filter_map(|(l, exe, key, w, h)| Some((l, exe.to_lowercase(), vk(&key)?, w.clamp(200.0, 1600.0), h.clamp(80.0, 900.0)))).collect();
+        .filter_map(|(l, exe, key, w, h, y)| Some((l, exe.to_lowercase(), vk(&key)?, w.clamp(200.0, 1600.0), h.clamp(80.0, 900.0), y.clamp(0.0, 0.95))))
+        .collect();
     for (label, w) in app.webview_windows() {
         if label.starts_with("po_") && !list.iter().any(|o| o.0 == label) {
             let _ = w.destroy();
@@ -1548,7 +1549,8 @@ fn plugin_overlays(app: &AppHandle) {
                 }
             }
         }
-        let down = active.iter().find(|o| unsafe { GetAsyncKeyState(o.2 as i32) } < 0).map(|o| o.0.clone());
+        let hit = active.iter().find(|o| unsafe { GetAsyncKeyState(o.2 as i32) } < 0);
+        let (down, y) = (hit.map(|o| o.0.clone()), hit.map_or(0.7, |o| o.5));
         if down != showing {
             if let Some(w) = showing.as_ref().and_then(|l| app.get_webview_window(l)) {
                 let _ = app.emit_to(w.label(), "visibility", false);
@@ -1557,7 +1559,7 @@ fn plugin_overlays(app: &AppHandle) {
             if let Some(w) = down.as_ref().and_then(|l| app.get_webview_window(l)) {
                 let _ = app.emit_to(w.label(), "visibility", true);
                 if let Ok(h) = w.hwnd() {
-                    place(h.0 as _);
+                    place(h.0 as _, y);
                     unsafe { ShowWindow(h.0 as _, SW_SHOWNOACTIVATE) };
                 }
             }

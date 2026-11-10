@@ -213,6 +213,9 @@ def load(pl):
         if not p:
             raise ValueError("main.py doesn't make a Plugin()")
         pl.module, pl.plugin, pl.ctx, pl.error = mod, p, Ctx(pl), None
+        if pl.id in MIGRATIONS and not (pl.ctx.data / ".migrated").exists():
+            MIGRATIONS[pl.id](pl)
+            (pl.ctx.data / ".migrated").write_text(time.strftime("%Y-%m-%d %H:%M"))
     except Exception as e:
         log.exception("Plugin %s failed to load", pl.id)
         pl.error = f"{type(e).__name__}: {e}"[:400]
@@ -297,6 +300,34 @@ async def blocks(pl, fn, **kw):
         return [{"type": "error", "text": pl.last_error}]
     out = [out] if isinstance(out, dict) else out or []
     return json.loads(json.dumps(clean(pl, out), default=str))
+
+
+def migrate_valorant(pl):
+    """Valorant was built in before 0.10.0: copy its match history, wishlist and settings into the plugin, once.
+    The old copies stay where they are (nothing is deleted)."""
+    from widgets import settings
+    ctx = pl.ctx
+    row = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='val_matches'").fetchone()
+    if row:
+        ctx.db.execute(row[0].replace("CREATE TABLE val_matches", "CREATE TABLE IF NOT EXISTS val_matches"))
+        ctx.db.execute("ATTACH DATABASE ? AS core", (str(DATA / "spotify.db"),))
+        try:
+            ctx.db.execute("INSERT OR IGNORE INTO val_matches SELECT * FROM core.val_matches")
+        finally:
+            ctx.db.execute("DETACH DATABASE core")
+    for name, dest in (("valorant.json", "account.json"), ("valorant-store.json", "shop.json")):
+        if (DATA / name).exists() and not (ctx.data / dest).exists():
+            shutil.copyfile(DATA / name, ctx.data / dest)
+    if settings.get("val_wishlist"):
+        ctx.store.setdefault("wishlist", settings["val_wishlist"])
+        ctx.save()
+    if settings.get("tab_y") is not None:
+        state.setdefault(pl.id, {}).setdefault("values", {}).setdefault("tab_y", settings["tab_y"])
+        save_state()
+    log.info("Copied Valorant into its plugin (%s)", "with match history" if row else "no match history")
+
+
+MIGRATIONS = {"valorant": migrate_valorant}
 
 
 def discover():
@@ -401,11 +432,12 @@ def info(pl):
         "description": m.get("description", ""), "icon": image(pl, m.get("icon")), "homepage": m.get("homepage", ""),
         "enabled": pl.enabled, "dev": pl.dev, "path": str(pl.dir), "error": pl.error, "last_error": pl.last_error,
         "uses": uses(m), "settings": m.get("settings") or [], "values": values(pl),
-        "pages": [{"id": k, "title": t, "ranges": r} for k, (_, t, r) in p.pages.items()] if p else [],
+        "pages": [{"id": k, "title": t, "ranges": r, "choices": c} for k, (_, t, r, c) in p.pages.items()] if p else [],
         "widgets": [{"id": k, "title": t, "sizes": s} for k, (_, t, s) in p.widgets.items()] if p else [],
         "sections": [{"id": k, "title": t} for k, (_, t) in p.sections.items()] if p else [],
         "jobs": [fn.__name__ for fn, _, _ in p.jobs] if p else [],
-        "overlays": [{"id": fn.__name__, "game": g, "key": k, "w": w, "h": h} for fn, g, k, w, h in p.overlays] if p else [],
+        "overlays": [{"id": fn.__name__, "game": g, "key": k, "w": w, "h": h, "y": float(values(pl).get(y, 0.7) if isinstance(y, str) else y)}
+                     for fn, g, k, w, h, y in p.overlays] if p else [],
         "ducks": bool(p and p.ducks), "duck": state.get(pl.id, {}).get("duck", True),
     }
 
@@ -592,12 +624,15 @@ async def plugin_alerts(after: int = 0):
 
 # --- What plugins draw ---------------------------------------------------------------------------------------------
 @router.get("/p/{pid}/page/{name}")
-async def page(pid: str, name: str, range: str = "all"):
+async def page(pid: str, name: str, range: str = "all", choice: str = None):
     pl = running(pid)
     if name not in pl.plugin.pages:
         raise HTTPException(404, "No such page")
-    fn, _, ranges = pl.plugin.pages[name]
-    return await blocks(pl, fn, **({"range": range} if ranges else {}))
+    fn, _, ranges, choices = pl.plugin.pages[name]
+    kw = {"range": range} if ranges else {}
+    if choices:
+        kw["choice"] = choice if any(c[0] == choice for c in choices) else choices[0][0]
+    return await blocks(pl, fn, **kw)
 
 
 @router.get("/p/{pid}/widget/{name}")
