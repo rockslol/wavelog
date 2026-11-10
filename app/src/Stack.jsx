@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { usePoll } from "./api";
 import Frame from "./Frame";
 import Widget from "./Widget";
-import { Calendar, Clock, Countdown, Lyrics, Note, Photos, System, Timer, Todo, Valorant, Weather } from "./widgets";
+import { Calendar, Clock, Countdown, Lyrics, Note, Photos, System, Timer, Todo, Weather } from "./widgets";
 
-const VIEWS = { widget: Widget, lyrics: Lyrics, calendar: Calendar, photos: Photos, weather: Weather, system: System, clock: Clock, countdown: Countdown, todo: Todo, timer: Timer, note: Note, valorant: Valorant };
+const VIEWS = { widget: Widget, lyrics: Lyrics, calendar: Calendar, photos: Photos, weather: Weather, system: System, clock: Clock, countdown: Countdown, todo: Todo, timer: Timer, note: Note };
 
 function saved() {
   try {

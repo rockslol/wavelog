@@ -604,10 +604,8 @@ async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery
 
 @router.get("/duck/state")
 async def duck_state():
-    """For Spotify ducking in the app: Valorant's match phase and the fullscreen game in front, if any."""
+    """For Spotify ducking in the app: the fullscreen game in front, if any, and whether a plugin wants it quieter."""
     import games
-    import valorant
     import plugins
     g = games.game()
-    return {"valorant": valorant.live_cache.get("phase") if valorant.in_valorant() else None, "game": g[0] if g else None,
-            "plugins": await plugins.ducking()}
+    return {"game": g[0] if g else None, "plugins": await plugins.ducking()}

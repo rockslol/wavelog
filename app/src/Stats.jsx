@@ -9,7 +9,6 @@ import { About, Advanced } from "./Advanced";
 import { installUpdate, startUpdateChecks, useUpdate } from "./update";
 import Columns from "./Columns";
 import { CalendarHeat, HourHeat } from "./Heat";
-import { Rounds, result, score, signed } from "./widgets";
 import { Blocks, loadPlugins, PluginSettings, pimg, pluginList, pluginOverlays, pluginSections, pluginWidgets, send, usePlugins } from "./Plugins";
 
 const Open = createContext(() => {});
@@ -184,7 +183,7 @@ export function Segmented({ options, value, onChange }) {
   );
 }
 
-const TABS = [["overview", "Overview"], ["wrapped", "Wrapped"], ["gaming", "Gaming"], ["valorant", "Valorant"], ["lyrics", "Lyrics"], ["settings", "Settings"]];
+const TABS = [["overview", "Overview"], ["wrapped", "Wrapped"], ["gaming", "Gaming"], ["lyrics", "Lyrics"], ["settings", "Settings"]];
 const Header = ({ tab, children, title }) => {
   const name = title ?? TABS.find(([k]) => k === tab)?.[1];
   return (name || children) && (
@@ -199,7 +198,6 @@ const NAV_ICONS = {
   overview: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   wrapped: "M12 2l2.2 6.3 6.3 2.2-6.3 2.2L12 19l-2.2-6.3-6.3-2.2 6.3-2.2zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z",
   gaming: "M7 7h10a5 5 0 0 1 4.9 6l-.8 4a2.5 2.5 0 0 1-4.3 1.2L14.5 16h-5l-2.3 2.2A2.5 2.5 0 0 1 2.9 17l-.8-4A5 5 0 0 1 7 7zm0 3v1.5H5.5v2H7V15h2v-1.5h1.5v-2H9V10zm8.5.5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm2.5 2.5a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z",
-  valorant: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 0 1 7.9 7H17v2h2.9A8 8 0 0 1 13 19.9V17h-2v2.9A8 8 0 0 1 4.1 13H7v-2H4.1A8 8 0 0 1 11 4.1V7h2V4.1z",
   lyrics: "M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm-7 9h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.9V21h-2v-3.1A7 7 0 0 1 5 11z",
   settings: "M10.5 2h3l.5 2.6 1.7.7 2.2-1.5 2.1 2.1-1.5 2.2.7 1.7 2.6.5v3l-2.6.5-.7 1.7 1.5 2.2-2.1 2.1-2.2-1.5-1.7.7-.5 2.6h-3l-.5-2.6-1.7-.7-2.2 1.5-2.1-2.1 1.5-2.2-.7-1.7L2 13.5v-3l2.6-.5.7-1.7-1.5-2.2 2.1-2.1 2.2 1.5 1.7-.7zM12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z",
 };
@@ -213,7 +211,6 @@ Object.assign(NAV_ICONS, {
   "s-calendar": "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
   "s-photos": "M3 5h18v14H3zm2 2v10h14V7zm1 9 4-5 3 3 2-2 3 4z",
   "s-productivity": "M4 4h16v16H4zm2 2v12h12V6zm3.5 5.1L11 12.6l3.5-3.5 1.4 1.4-4.9 4.9-2.9-2.9z",
-  "s-valorant": NAV_ICONS.valorant,
   "s-pc": "M3 4h18v12H3zm2 2v8h14V6zM8 18h8v2H8z",
   "s-sound": "M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2zM18.4 6a8.5 8.5 0 0 1 0 12L17 16.6a6.5 6.5 0 0 0 0-9.2z",
   "s-accounts": "M12 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM3.5 21a8.5 8.5 0 0 1 17 0z",
@@ -321,6 +318,13 @@ function Sidebar({ tab, setTab, detail }) {
             <div className="name">{up.state === "installing" ? `Updating ${Math.round(up.progress * 100)}%` : `Update to ${up.update.version}`}</div>
             <div className="sub">{up.state === "installing" ? "Wavelog restarts when done" : "Click to install and restart"}</div>
           </div>
+        </button>
+      )}
+      {plug?.notice && (
+        <button className="side-alert info" title={plug.notice.title}
+          onClick={() => (setTab("settings"), setPage("plugins"), send("/plugins/notice/dismiss").then(loadPlugins).catch(() => {}))}>
+          <i>✓</i>
+          <div className="meta"><div className="name">{plug.notice.title}</div><div className="sub">{plug.notice.text}</div></div>
         </button>
       )}
       {now?.id && !inSettings && (
@@ -772,221 +776,6 @@ function SteamCard() {
   );
 }
 
-const timeLeft = (t) => {
-  const s = Math.max(0, t - Date.now() / 1000), h = Math.floor(s / 3600);
-  return h >= 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${h} h ${Math.floor((s % 3600) / 60)} min`;
-};
-
-function ValStore() {
-  const [st, setSt] = useState(null);
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState([]);
-  const load = (refresh) => get("/valorant/store" + (refresh ? "?refresh=true" : "")).then(setSt).catch(() => {});
-  useEffect(() => void load(), []);
-  useEffect(() => {
-    if (q.trim().length < 2) return setHits([]);
-    const id = setTimeout(() => get("/valorant/skins?q=" + encodeURIComponent(q.trim())).then(setHits).catch(() => {}), 200);
-    return () => clearTimeout(id);
-  }, [q]);
-  if (!st?.enabled) return null;
-  const wl = st.wishlist || [];
-  const saveWl = (list) => fetch(API + "/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ val_wishlist: list }) })
-    .then(() => (emit("settings"), load())).catch(() => {});
-  const has = (id) => wl.some((w) => w.id === id);
-  const toggle = (s) => saveWl(has(s.id) ? wl.filter((w) => w.id !== s.id) : [...wl, { id: s.id, name: s.name, icon: s.icon }]);
-  const skin = (s, night) => (
-    <div key={s.id} className={"vskin" + (has(s.id) ? " wanted" : "")} style={{ "--tier": s.tier?.color || "#8a8a8a" }}>
-      <button className="vheart" title={has(s.id) ? "On your wishlist" : "Add to wishlist"} onClick={() => toggle(s)}>{has(s.id) ? "♥" : "♡"}</button>
-      {s.icon ? <img src={s.icon} draggable={false} loading="lazy" /> : <div className="vnoimg" />}
-      <div className="vname">{s.name}</div>
-      <div className="vprice">
-        {night && s.was ? <s>{fmt(s.was)}</s> : null}{fmt(s.price)} VP{night && s.discount ? <em>-{s.discount}%</em> : null}
-      </div>
-    </div>
-  );
-  return (
-    <>
-      <section className="card">
-        <div className="head">
-          <h3>Store</h3>
-          <span className="hint">{st.daily.length ? `Resets in ${timeLeft(st.daily_ends)}` : st.error}</span>
-          {st.riot_open && <button className="link" onClick={() => load(true)}>Refresh</button>}
-        </div>
-        {st.daily.length > 0 && <div className="vstore">{st.daily.map((s) => skin(s))}</div>}
-      </section>
-      {st.night?.length > 0 && (
-        <section className="card">
-          <div className="head"><h3>Night market</h3><span className="hint">Ends in {timeLeft(st.night_ends)}</span></div>
-          <div className="vstore night">{st.night.map((s) => skin(s, true))}</div>
-        </section>
-      )}
-      <section className="card">
-        <div className="head"><h3>Wishlist</h3><span className="hint">The notch tells you when one is in your store</span></div>
-        {wl.length > 0 && (
-          <div className="vwish">
-            {wl.map((w) => (
-              <span key={w.id} className="vw">{w.icon && <img src={w.icon} draggable={false} />}{w.name}<button onClick={() => toggle(w)} aria-label={"Remove " + w.name}>×</button></span>
-            ))}
-          </div>
-        )}
-        <input className="vsearch" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Add a skin, e.g. Reaver Vandal" />
-        {hits.length > 0 && (
-          <div className="vhits">
-            {hits.map((h) => (
-              <button key={h.id} className={has(h.id) ? "on" : ""} onClick={() => (toggle(h), setQ(""))}>
-                {h.icon ? <img src={h.icon} draggable={false} /> : <i />}<span>{h.name}</span>{has(h.id) && <b>✓</b>}
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
-    </>
-  );
-}
-
-const pct = (a, b) => (b ? Math.round((a / b) * 100) + "%" : "None");
-const when = (ms) => new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
-
-function ValorantTab({ tab, setTab }) {
-  const { data, error } = useApi({ v: "/valorant" });
-  const [fresh, setFresh] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState("all");
-  useEffect(() => setFresh(null), [data]);
-  const v = fresh || data?.v;
-  const post = (path, body) => fetch(API + path, { method: body ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
-  const refresh = () => (setBusy(true), post("/valorant/refresh").then((r) => r.json()).then(setFresh).catch(() => {}).finally(() => setBusy(false)));
-  const turnOn = () => post("/settings", { valorant: true }).then(() => (emit("settings"), refresh()));
-  const head = (
-    <Header tab={tab} setTab={setTab}>
-      {v?.enabled && <Segmented options={[["all", "All modes"], ["comp", "Competitive"]]} value={mode} onChange={setMode} />}
-      {v?.enabled && <button className="pill glass" onClick={refresh}>{busy ? "Updating" : "Refresh"}</button>}
-    </Header>
-  );
-  if (!v) return <>{head}<Status error={error} /></>;
-  if (!v.enabled) return (
-    <>
-      {head}
-      <div className="body">
-        <section className="card wrapped-hero">
-          <div className="sub">Valorant tracker</div>
-          <h2>Your rank, RR and matches</h2>
-          <p className="hint">Reads your own match history from Riot through the Riot Client on this PC, while it's running. No key or website needed. It's an unofficial Riot endpoint that many trackers use, so it can break after a patch.</p>
-          <button className="primary" onClick={turnOn}>Turn on</button>
-        </section>
-      </div>
-    </>
-  );
-  const a = v.assets, tier = a.tiers[v.current?.tier] || {}, peak = a.tiers[v.peak];
-  const s = mode === "comp" ? v.competitive : v.all;
-  const matches = v.matches.filter((m) => mode === "all" || m.mode === "Competitive");
-  return (
-    <>
-      {head}
-      <div className="body">
-        <section className="card spotlight valo">
-          {tier.icon ? <img className="img big tier" src={tier.icon} draggable={false} /> : <div className="img big" />}
-          <div className="grow">
-            <div className="sub">{v.riot_id || "Valorant"}</div>
-            <h2>{tier.name || "Unranked"}</h2>
-            <div className="sub">{v.current?.rr ?? 0} RR · last ranked game <span className={(v.current?.last_change ?? 0) >= 0 ? "up" : "down"}>{signed(v.current?.last_change)}</span>{peak ? ` · peak this act ${peak.name}` : ""}</div>
-            <div className="bar rr"><div style={{ width: Math.min(100, v.current?.rr ?? 0) + "%" }} /></div>
-            <div className="hint">{v.error || (v.updated ? `Updated ${new Date(v.updated * 1000).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}` : "")}</div>
-          </div>
-        </section>
-        <ValStore />
-        <div className="tiles">
-          <Tile label="Matches" value={fmt(s.games)} sub={`${s.wins} won`} />
-          <Tile label="Win rate" value={pct(s.wins, s.decided)} />
-          <Tile label="K/D" value={s.kd.toFixed(2)} />
-          <Tile label="Headshot %" value={s.hs + "%"} />
-          <Tile label="ADR" value={fmt(s.adr)} sub="Damage per round" />
-          <Tile label="ACS" value={fmt(s.acs)} sub="Combat score" />
-        </div>
-        <section className="card">
-          <div className="head"><h3>Matches</h3><span className="hint rtl-legend">Each bar is a round · taller = more kills · faded = you died · <s /> first blood</span></div>
-          {matches.length ? (
-            <ol className="list matches">
-              {matches.map((m) => (
-                <li key={m.id} className={"match " + result(m)}>
-                  <Img src={a.agents[m.agent_id]?.icon} />
-                  <div className="meta">
-                    <div className="m-top">
-                      <span className="name">{m.map}</span>
-                      <span className="m-res">{result(m) === "W" ? "Win" : result(m) === "L" ? "Loss" : "Draw"} {score(m)}</span>
-                    </div>
-                    <div className="sub">{m.mode} · {m.agent} · {when(m.started_at)} · {Math.round(m.length / 60000)} min</div>
-                    {m.round_list?.length > 0 && <Rounds list={m.round_list} />}
-                  </div>
-                  <div className="kda">
-                    <b>{m.kills}<i>/</i>{m.deaths}<i>/</i>{m.assists}</b>
-                    <span>{m.shots ? pct(m.headshots, m.shots) : "0%"} HS · {Math.round(m.score / m.rounds)} ACS</span>
-                  </div>
-                  <div className={"rrc " + (m.rr > 0 ? "up" : m.rr < 0 ? "down" : "")}>{m.rr == null ? "" : <>{signed(m.rr)}<small>RR</small></>}</div>
-                </li>
-              ))}
-            </ol>
-          ) : <p className="none">No matches yet.</p>}
-        </section>
-        <div className="grid2">
-          <section className="card">
-            <div className="head"><h3>Agents</h3></div>
-            <ol className="list">
-              {v.agents.map((x) => (
-                <li key={x.name}>
-                  <Img src={a.agents[x.id]?.icon} />
-                  <div className="meta">
-                    <div className="name">{x.name}</div>
-                    <div className="sub">{x.games} {x.games === 1 ? "match" : "matches"} · {pct(x.wins, x.decided)} won · {x.kd.toFixed(2)} K/D · {x.acs} ACS</div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
-          <section className="card">
-            <div className="head"><h3>Maps</h3></div>
-            <ol className="list">
-              {v.maps.map((x) => (
-                <li key={x.name}>
-                  <Img src={a.maps[x.id]?.icon} />
-                  <div className="meta">
-                    <div className="name">{x.name}</div>
-                    <div className="sub">{x.games} {x.games === 1 ? "match" : "matches"} · {pct(x.wins, x.decided)} won</div>
-                    <div className="meter"><div style={{ width: (x.decided ? x.wins / x.decided : 0) * 100 + "%" }} /></div>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
-        <Songs items={v.songs} />
-      </div>
-    </>
-  );
-}
-
-function Songs({ items }) {
-  const open = useContext(Open);
-  return (
-    <section className="card">
-      <div className="head"><h3>Songs you win with</h3><span className="hint">Played during a match, best win rate first</span></div>
-      {items.length ? (
-        <ol className="list">
-          {items.map((x) => (
-            <li key={x.id} className="clickable" onClick={() => open({ kind: "track", id: x.id })}>
-              <Img src={x.image} />
-              <div className="meta">
-                <div className="name">{x.name}</div>
-                <div className="sub">{x.artists} · won {x.wins} of {x.games}</div>
-              </div>
-            </li>
-          ))}
-        </ol>
-      ) : <p className="none">Play Valorant with Spotify on and this fills in.</p>}
-    </section>
-  );
-}
-
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 const MEDIA = {
   prev: "M6 6h2v12H6zM9.5 12 18 6v12z",
@@ -1310,7 +1099,7 @@ function Detail({ kind, id, tab, setTab, back }) {
 }
 
 const WIDGETS = [["widget", "Now playing"], ["lyrics", "Lyrics"], ["calendar", "Calendar"], ["photos", "Photos"], ["weather", "Weather"], ["system", "PC monitor"],
-  ["clock", "Clock"], ["countdown", "Countdown"], ["todo", "To do"], ["timer", "Focus timer"], ["note", "Note"], ["valorant", "Valorant"], ["viz", "Visualizer"]];
+  ["clock", "Clock"], ["countdown", "Countdown"], ["todo", "To do"], ["timer", "Focus timer"], ["note", "Note"], ["viz", "Visualizer"]];
 const ALL = [...WIDGETS, ["stack", "Widget stack"], ["notch", "Notch"]];
 
 const SIZES = [["s", "Small"], ["m", "Medium"], ["l", "Large"]];
@@ -1323,7 +1112,7 @@ function applyWidgets(s) {
     localStorage.setItem("widgets", JSON.stringify(list));
     localStorage.setItem("scale", String(s.scale ?? 1));
   } catch {}
-  return invoke("set_widgets", { list, scale: s.scale ?? 1, overlay: s.overlay || [], tabY: s.tab_y ?? 0.7 });
+  return invoke("set_widgets", { list, scale: s.scale ?? 1, overlay: s.overlay || [] });
 }
 
 export const Switch = ({ on, onChange }) => (
@@ -1333,7 +1122,7 @@ export const Switch = ({ on, onChange }) => (
 const PAGE_GROUPS = [
   ["App", [["general", "General"], ["look", "Appearance"]]],
   ["On screen", [["widgets", "Widgets"], ["notch", "Notch"], ["pc", "Your PC"], ["sound", "Sound"]]],
-  ["Connected", [["accounts", "Accounts"], ["valorant", "Valorant"], ["places", "Calendar & photos"], ["plugins", "Plugins"]]],
+  ["Connected", [["accounts", "Accounts"], ["places", "Calendar & photos"], ["plugins", "Plugins"]]],
   ["More", [["productivity", "Productivity"], ["advanced", "Advanced"], ["about", "About"]]],
 ];
 const PAGES = PAGE_GROUPS.flatMap(([, list]) => list);
@@ -1346,7 +1135,6 @@ const PAGE_INFO = {
   pc: "What the notch tells you about your PC: mic and camera, screenshots, downloads, notifications and the file shelf",
   sound: "Spotify gets quieter on its own during calls, videos and games",
   accounts: "Spotify, Last.fm and Steam, and whether each one works",
-  valorant: "The tracker, the Tab panel in matches and the widget",
   places: "Weather, calendars and photos for the widgets and the notch",
   plugins: "Add pages and features made by you or other people, and turn them on or off",
   productivity: "Countdowns, to-dos, the note and the focus timer",
@@ -1371,9 +1159,8 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Replace Windows' volume pop-up": "osd flyout hide volume keys", "Record other players": "youtube log history stats",
+"Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Replace Windows' volume pop-up": "osd flyout hide volume keys", "Record other players": "youtube log history stats",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
-  "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
   "Install a plugin": "addon add-on extension mod zip", "Load a folder": "developer dev plugin make your own reload",
 };
 const EXTRA = [
@@ -1744,7 +1531,6 @@ function Settings({ tab, setTab }) {
       <section className="card group">
         <Row label="Lower during calls" hint="While Discord, Teams, Zoom or a browser call uses your mic">{nSwitch("duck_calls")}</Row>
         <Row label="Lower while a video plays" hint="YouTube, Twitch and other sound from a browser or video player for more than 2 seconds">{nSwitch("duck_videos")}</Row>
-        <Row label="Lower in Valorant matches" hint="From the start of a match until you're back in the menu">{nSwitch("duck_valorant")}</Row>
         <Row label="Lower in other games" hint="While any fullscreen game is in front">{nSwitch("duck_games")}</Row>
         {pDucks.map((p) => (
           <Row key={p.id} label={`Lower for ${p.name}`} hint="The plugin says when, for example during a match">
@@ -1794,7 +1580,7 @@ function Settings({ tab, setTab }) {
         <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
         <Row label="Wishlist sale alerts" hint="The notch tells you when a game on your wishlist goes on sale or gets cheaper. Works without an API key">{nSwitch("steam_sales")}</Row>
       </section>
-      <p className="hint foot-note">Steam shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings. Valorant needs no account: it reads the Riot Client on this PC.</p>
+      <p className="hint foot-note">Steam shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings.</p>
     </>,
     general: <>
       <section className="card group">
@@ -1927,19 +1713,6 @@ function Settings({ tab, setTab }) {
         </div>
       </section>
     </>,
-    valorant: <>
-      <section className="card group">
-        <Row label="Valorant tracker" hint="Rank, RR, matches and rounds, read from the Riot Client on this PC"><Switch on={s.valorant} onChange={() => set({ valorant: !s.valorant })} /></Row>
-        <Row label="Tab panel" hint="Hold Tab in a match for today, this map, this agent and your last match. Needs Windowed Fullscreen"><span className="hint">{s.valorant ? "On" : "Needs the tracker"}</span></Row>
-        <Row label="Tab panel height" hint={`${Math.round((s.tab_y ?? 0.7) * 100)}% down the screen, centred. Raise it for Skirmish, lower it for 5v5`}>
-          <input {...slider("tab_y", 0.3, 0.9)} value={s.tab_y ?? 0.7} />
-        </Row>
-        <Row label="Valorant widget" hint={s.widgets.includes("valorant") ? "On. Size and Over games are under Widgets" : "Turn it on under Widgets, with Over games to keep it up in a match"}>
-          <button className="pill glass" onClick={() => setPage("widgets")}>Widgets</button>
-        </Row>
-      </section>
-      <p className="hint foot-note">Uses the same unofficial Riot endpoints as other desktop trackers, only for your own account. It never touches the game, but a patch can break it.</p>
-    </>,
   };
   useEffect(() => {
     if (pages) publishIndex(pages);
@@ -2029,8 +1802,8 @@ function PluginTab({ tab, setTab }) {
 }
 
 export default function Stats() {
-  const hash = location.hash.slice(1).split("/");
-  const [tab, setTabRaw] = useState(["overview", "wrapped", "gaming", "valorant", "lyrics", "settings"].includes(hash[0]) || hash[0].startsWith("p.") ? hash[0] : "overview");
+  const hash = location.hash.slice(1).replace(/^valorant$/, "p.valorant.page").split("/");
+  const [tab, setTabRaw] = useState(["overview", "wrapped", "gaming", "lyrics", "settings"].includes(hash[0]) || hash[0].startsWith("p.") ? hash[0] : "overview");
   const [detail, setDetail] = useState(hash[1] ? { kind: hash[0], id: hash[1] } : null);
   const setTab = (t) => (setDetail(null), setTabRaw(t));
   useEffect(() => {
@@ -2053,7 +1826,7 @@ export default function Stats() {
     get("/settings").then(applyWidgets).catch(() => {});
     invoke("set_overlays", { list: pluginOverlays(plug) }).catch(() => {});
   }, [plugKey]);
-  const View = tab.startsWith("p.") ? PluginTab : { overview: Overview, wrapped: Wrapped, gaming: Gaming, valorant: ValorantTab, lyrics: LyricsView, settings: Settings }[tab];
+  const View = tab.startsWith("p.") ? PluginTab : { overview: Overview, wrapped: Wrapped, gaming: Gaming, lyrics: LyricsView, settings: Settings }[tab];
   const open = (d) => (setDetail(d), window.scrollTo(0, 0));
   return (
     <Open.Provider value={open}>

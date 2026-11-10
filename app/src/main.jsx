@@ -8,12 +8,12 @@ import "@fontsource/inter/700.css";
 import "./style.css";
 import Widget from "./Widget";
 import Stats from "./Stats";
-import { Calendar, Clock, Countdown, Lyrics, Note, Photos, System, TabPanel, Timer, Todo, Valorant, Visualizer, Weather } from "./widgets";
+import { Calendar, Clock, Countdown, Lyrics, Note, Photos, System, Timer, Todo, Visualizer, Weather } from "./widgets";
 import Stack from "./Stack";
 import Notch from "./Notch";
 import { PluginOverlay, PluginWidget } from "./Plugins";
 
-const VIEWS = { widget: Widget, lyrics: Lyrics, calendar: Calendar, photos: Photos, weather: Weather, system: System, clock: Clock, countdown: Countdown, todo: Todo, timer: Timer, note: Note, valorant: Valorant, viz: Visualizer, tabpanel: TabPanel, stack: Stack, notch: Notch, stats: Stats };
+const VIEWS = { widget: Widget, lyrics: Lyrics, calendar: Calendar, photos: Photos, weather: Weather, system: System, clock: Clock, countdown: Countdown, todo: Todo, timer: Timer, note: Note, viz: Visualizer, stack: Stack, notch: Notch, stats: Stats };
 const label = getCurrentWindow().label;
 const View = VIEWS[label] || (label.startsWith("po_") ? PluginOverlay : label.startsWith("p_") ? PluginWidget : Stats);
 document.documentElement.dataset.view = label === "stats" ? "stats" : "widget";

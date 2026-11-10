@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8721; img-src 'self' data: https://i.scdn.co https://media.valorant-api.com https://*.steamstatic.com https://media.steampowered.com https://steamcdn-a.akamaihd.net http://127.0.0.1:8721; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8721; img-src 'self' data: https://i.scdn.co https://*.steamstatic.com https://media.steampowered.com https://steamcdn-a.akamaihd.net http://127.0.0.1:8721; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {

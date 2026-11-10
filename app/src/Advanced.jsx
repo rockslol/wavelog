@@ -8,7 +8,7 @@ import { Row, Segmented, Switch } from "./Stats";
 
 const JOBS = {
   "poller.poll_current": "Now playing", "poller.poll_recent": "Recently played", "poller.fill_missing": "Song details",
-  "db.backup": "Daily backup", "games.track": "Game tracking", "lastfm.auto": "Last.fm sync", "valorant.sync": "Valorant matches",
+  "db.backup": "Daily backup", "games.track": "Game tracking", "lastfm.auto": "Last.fm sync",
 };
 const ago = (t) => {
   if (!t) return "never";
@@ -206,7 +206,7 @@ export function About() {
         <Row label="Logger" hint="Python, FastAPI, SQLite, Pillow, psutil" />
         <Row label="Data from" hint="Spotify Web API, LRCLIB and NetEase lyrics, Open-Meteo weather, Last.fm, the Riot Client on this PC" />
       </section>
-      <p className="hint foot-note">Not affiliated with or endorsed by Spotify, Riot Games or Last.fm. Valorant stats come from unofficial Riot Client endpoints and can break after a game update.</p>
+      <p className="hint foot-note">Not affiliated with or endorsed by Spotify, Riot Games or Last.fm. The Valorant plugin uses unofficial Riot Client endpoints and can break after a game update.</p>
     </>
   );
 }

@@ -323,11 +323,54 @@ def migrate_valorant(pl):
         ctx.save()
     if settings.get("tab_y") is not None:
         state.setdefault(pl.id, {}).setdefault("values", {}).setdefault("tab_y", settings["tab_y"])
-        save_state()
+    if (settings.get("notch") or {}).get("duck_valorant") is False:
+        state.setdefault(pl.id, {}).setdefault("duck", False)
+    save_state()
     log.info("Copied Valorant into its plugin (%s)", "with match history" if row else "no match history")
 
 
 MIGRATIONS = {"valorant": migrate_valorant}
+
+
+def bundled(pid):
+    """Plugins that ship inside Wavelog (only for moving built-in features out). Frozen: in the exe; from source:
+    the wavelog-plugins folder next to the app."""
+    base = Path(getattr(sys, "_MEIPASS", "")) / "bundled" if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2] / "wavelog-plugins"
+    folder = base / pid
+    return folder if (folder / "plugin.json").exists() else None
+
+
+def adopt_valorant():
+    """0.10.0 took Valorant out of the app. Anyone who had the tracker on gets the plugin, once, with their Valorant
+    widget, notch section and Over games kept, and a notice in the stats window."""
+    from widgets import FILE, settings
+    if state.get("_moved_valorant"):
+        return
+    state["_moved_valorant"] = True
+    if settings.get("valorant") and not (ROOT / "valorant").exists() and (src := bundled("valorant")):
+        shutil.copytree(src, ROOT / "valorant", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"))
+        state.setdefault("valorant", {})["enabled"] = True
+        state["_notice"] = {"id": "valorant", "title": "Valorant is a plugin now",
+                            "text": "Same stats, store and Tab panel. Settings → Plugins"}
+        swap = {"valorant": "p_valorant_rank"}
+        settings["widgets"] = [swap.get(w, w) for w in settings.get("widgets", [])]
+        settings["overlay"] = [swap.get(w, w) for w in settings.get("overlay", [])]
+        settings["stack"] = [w for w in settings.get("stack", []) if w != "valorant"]
+        if "valorant" in (settings.get("sizes") or {}):
+            settings["sizes"]["p_valorant_rank"] = settings["sizes"].pop("valorant")
+        n = settings.get("notch") or {}
+        if n.get("sections"):
+            n["sections"] = ["p_valorant_last_match" if s == "valorant" else s for s in n["sections"]]
+        FILE.write_text(json.dumps(settings, indent=2))
+        log.info("Valorant moved into its plugin")
+    save_state()
+
+
+@router.post("/plugins/notice/dismiss")
+async def dismiss_notice():
+    state.pop("_notice", None)
+    save_state()
+    return {"ok": True}
 
 
 def discover():
@@ -352,6 +395,10 @@ def discover():
 
 async def start_all():
     global watcher
+    try:
+        adopt_valorant()
+    except Exception:
+        log.exception("Moving Valorant into its plugin failed")
     found, _ = discover()
     for folder, m, dev in found.values():
         pl = loaded[m["id"]] = Loaded(folder, m, dev)
@@ -559,7 +606,7 @@ async def list_plugins():
     _, errors = discover()
     broken = [{"path": str(f), "error": str(e)} for f, e in errors]
     return {"plugins": [info(pl) for pl in sorted(loaded.values(), key=lambda p: p.manifest["name"].lower())],
-            "broken": broken, "folder": str(ROOT), "api": wavelog.API}
+            "broken": broken, "folder": str(ROOT), "api": wavelog.API, "notice": state.get("_notice")}
 
 
 def coerce(spec, v):

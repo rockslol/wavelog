@@ -30,7 +30,6 @@ import steam
 import notifs
 import plugins
 import shelf
-import valorant
 import widgets
 
 
@@ -41,9 +40,7 @@ async def lifespan(app):
              asyncio.create_task(poller.loop(poller.fill_missing, 2)),
              asyncio.create_task(poller.loop(db.backup, 3600)),
              asyncio.create_task(poller.loop(games.track, games.EVERY)),
-             asyncio.create_task(poller.loop(lastfm.auto, 1800)),
-             asyncio.create_task(poller.loop(valorant.sync, lambda: 120 if valorant.in_valorant() else 900)),
-             asyncio.create_task(poller.loop(valorant.watch, 15))]
+             asyncio.create_task(poller.loop(lastfm.auto, 1800))]
     await plugins.start_all()
     yield
     await plugins.stop_all()
@@ -61,7 +58,6 @@ app.include_router(debug.router)
 app.include_router(widgets.router)
 app.include_router(share.router)
 app.include_router(games.router)
-app.include_router(valorant.router)
 app.include_router(pcwatch.router)
 app.include_router(steam.router)
 app.include_router(notifs.router)

@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWi
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use tauri_plugin_global_shortcut::ShortcutState;
 
-const WIDGETS: [&str; 14] = ["widget", "lyrics", "calendar", "photos", "weather", "system", "clock", "countdown", "todo", "timer", "note", "valorant", "stack", "viz"];
+const WIDGETS: [&str; 13] = ["widget", "lyrics", "calendar", "photos", "weather", "system", "clock", "countdown", "todo", "timer", "note", "stack", "viz"];
 
 fn dims(size: &str) -> (f64, f64) {
     match size {
@@ -27,8 +27,6 @@ static SCALE: AtomicU64 = AtomicU64::new(0x3FF0000000000000);
 static DRAG: Mutex<Option<String>> = Mutex::new(None);
 static BACKEND: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static OVERLAY: Mutex<Vec<String>> = Mutex::new(Vec::new());
-static TAB: AtomicBool = AtomicBool::new(false);
-static TAB_Y: AtomicU64 = AtomicU64::new(0x3FE6666666666666);
 static RAISED: AtomicBool = AtomicBool::new(false);
 static NOTCH: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 static NOTCH_IN: AtomicBool = AtomicBool::new(false);
@@ -62,7 +60,7 @@ fn shown(label: &str) -> bool {
 
 fn sync(app: &AppHandle) {
     for (label, w) in app.webview_windows() {
-        if label == "stats" || label == "tabpanel" || label.starts_with("po_") {
+        if label == "stats" || label.starts_with("po_") {
             continue;
         }
         let (on, over) = (shown(&label), shown(&label) && !visible());
@@ -82,7 +80,7 @@ fn sync(app: &AppHandle) {
 }
 
 fn on_desk(label: &str) -> bool {
-    !matches!(label, "stats" | "tabpanel" | "notch") && !label.starts_with("po_")
+    !matches!(label, "stats" | "notch") && !label.starts_with("po_")
 }
 
 /// Plugin windows are named p_<plugin>_<widget> (widgets) and po_<plugin>_<overlay>. Labels end up in file names
@@ -561,7 +559,7 @@ async fn set_audio_output(id: String) -> bool {
 
 // ---- Auto-ducking ----------------------------------------------------------------------------------------------
 // Lowers Spotify (its own mixer row, not the PC) during calls, videos and games, and fades it back after.
-// Settings come from the logger (notch.duck_*); Valorant match state and the fullscreen game from /duck/state.
+// Settings come from the logger (notch.duck_*); the fullscreen game and what plugins want from /duck/state.
 const CALL_APPS: [&str; 14] = ["discord.exe", "teams.exe", "ms-teams.exe", "zoom.exe", "skype.exe", "slack.exe", "whatsapp.exe",
     "telegram.exe", "signal.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe"];
 const VIDEO_APPS: [&str; 11] = ["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vlc.exe", "mpv.exe",
@@ -572,7 +570,6 @@ static DUCK_BASE: Mutex<Option<f32>> = Mutex::new(None); // Spotify's volume bef
 struct DuckCfg {
     calls: bool,
     videos: bool,
-    valorant: bool,
     games: bool,
     level: f32,
 }
@@ -593,7 +590,6 @@ fn duck_cfg() -> Option<DuckCfg> {
     Some(DuckCfg {
         calls: on("duck_calls", true),
         videos: on("duck_videos", true),
-        valorant: on("duck_valorant", true),
         games: on("duck_games", false),
         level: n.get("duck_level").and_then(|v| v.as_f64()).unwrap_or(0.25) as f32,
     })
@@ -615,9 +611,9 @@ fn fade(sessions: &[windows::Win32::Media::Audio::ISimpleAudioVolume], from: f32
 
 fn ducker() {
     use std::time::Instant;
-    let mut cfg = DuckCfg { calls: false, videos: false, valorant: false, games: false, level: 0.25 };
+    let mut cfg = DuckCfg { calls: false, videos: false, games: false, level: 0.25 };
     let (mut cfg_at, mut state_at): (Option<Instant>, Option<Instant>) = (None, None);
-    let (mut in_match, mut in_game, mut in_plugin) = (false, false, false);
+    let (mut in_game, mut in_plugin) = (false, false);
     let (mut loud_start, mut loud_last): (Option<Instant>, Option<Instant>) = (None, None);
     let mut set_to: Option<f32> = None; // what we set while ducked
     let mut overridden = false; // the user moved the volume during a dip: leave it alone until the dip ends
@@ -629,12 +625,11 @@ fn ducker() {
                 cfg = c;
             }
         }
-        let on = cfg.calls || cfg.videos || cfg.valorant || cfg.games;
+        let on = cfg.calls || cfg.videos || cfg.games;
         // Every 5 s, also with the built-in reasons off: a plugin can ask for it too (its switch is in Settings > Sound).
         if state_at.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
             state_at = Some(Instant::now());
             if let Some(j) = http_get("/duck/state") {
-                in_match = j["valorant"] == "INGAME";
                 in_game = j["game"].is_string();
                 in_plugin = j["plugins"] == true;
             }
@@ -649,7 +644,7 @@ fn ducker() {
             }
             loud_start.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) // ignore short sounds
         };
-        let want = (on && (call || video || (cfg.valorant && in_match) || (cfg.games && in_game))) || in_plugin;
+        let want = (on && (call || video || (cfg.games && in_game))) || in_plugin;
 
         let sessions = spotify_sessions();
         match (sessions.first().and_then(|s| unsafe { s.GetMasterVolume() }.ok()), want) {
@@ -1328,14 +1323,11 @@ fn make(app: &AppHandle, label: &str, w: f64, h: f64, x: f64, y: f64) -> tauri::
 }
 
 #[tauri::command]
-async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<f64>, overlay: Option<Vec<String>>, tab_y: Option<f64>) -> Result<(), String> {
+async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<f64>, overlay: Option<Vec<String>>) -> Result<(), String> {
     // The stats page calls this twice at startup. Without the lock both calls see no window yet,
     // both build one, and the first copy loses its label: it never hides for games or reacts to hover.
     static BUSY: OnceLock<tauri::async_runtime::Mutex<()>> = OnceLock::new();
     let _busy = BUSY.get_or_init(|| tauri::async_runtime::Mutex::new(())).lock().await;
-    if let Some(t) = tab_y {
-        TAB_Y.store(t.clamp(0.0, 0.95).to_bits(), Relaxed);
-    }
     if let Some(o) = overlay {
         *OVERLAY.lock().unwrap() = o;
     }
@@ -1445,13 +1437,6 @@ fn backdrop(window: tauri::WebviewWindow, force: Option<bool>) -> tauri::ipc::Re
     tauri::ipc::Response::new(buf)
 }
 
-fn valorant_front() -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    let mut t = [0u16; 16];
-    let n = unsafe { GetWindowTextW(GetForegroundWindow(), t.as_mut_ptr(), 16) } as usize;
-    String::from_utf16_lossy(&t[..n]).starts_with("VALORANT")
-}
-
 fn place(h: HWND, down: f64) {
     use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*};
     unsafe {
@@ -1463,33 +1448,6 @@ fn place(h: HWND, down: f64) {
         let x = m.left + (m.right - m.left - (r.right - r.left)) / 2;
         let y = m.top + ((m.bottom - m.top) as f64 * down) as i32;
         SetWindowPos(h, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-    }
-}
-
-fn tab_panel(app: &AppHandle) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    loop {
-        let on = FULLSCREEN.load(Relaxed) && SHOWN.load(Relaxed) && valorant_front();
-        let panel = app.get_webview_window("tabpanel");
-        if on && panel.is_none() {
-            if let Ok(w) = base(app, "tabpanel", "Wavelog tab panel".into(), 740.0, 200.0).always_on_top(true).visible(false).build() {
-                let _ = w.set_ignore_cursor_events(true);
-                no_activate(&w);
-            }
-            continue;
-        }
-        let down = on && unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x09) } < 0;
-        if down != TAB.load(Relaxed) {
-            TAB.store(down, Relaxed);
-            if let Some(Ok(h)) = panel.as_ref().map(|w| w.hwnd()) {
-                let _ = app.emit_to("tabpanel", "visibility", down);
-                if down {
-                    place(h.0 as _, f64::from_bits(TAB_Y.load(Relaxed)));
-                }
-                unsafe { ShowWindow(h.0 as _, if down { SW_SHOWNOACTIVATE } else { SW_HIDE }) };
-            }
-        }
-        thread::sleep(Duration::from_millis(if on { 30 } else { 400 }));
     }
 }
 
@@ -1648,8 +1606,6 @@ fn main() {
                 })
                 .build(app)?;
 
-            let handle = app.handle().clone();
-            thread::spawn(move || tab_panel(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || plugin_overlays(&handle));
             let handle = app.handle().clone();

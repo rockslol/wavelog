@@ -33,8 +33,9 @@ DEFAULTS = {"widgets": ["widget"], "sizes": {}, "scale": 1.0, "tint": 0.4, "lock
             "now_lyrics": True, "calendars": [], "album": "", "folder": "", "photo_seconds": 30,
             "city": "", "place": "", "lat": None, "lon": None, "fahrenheit": False,
             "cover_glass": True, "countdowns": [], "todos": [], "pomodoro": [25, 5], "note": "",
-            "valorant": False, "overlay": [], "tab_y": 0.7, "notch": {},
-            "lastfm_user": "", "lastfm_key": "", "val_wishlist": [], "steam_key": "", "steam_id": ""}
+            "overlay": [], "notch": {}, "lastfm_user": "", "lastfm_key": "", "steam_key": "", "steam_id": ""}
+# Settings from before 0.10.0 (valorant, tab_y, val_wishlist) stay in the file: plugins.py reads them once when Valorant
+# moves into its plugin.
 settings = {**DEFAULTS, **(json.loads(FILE.read_text()) if FILE.exists() else {})}
 cache = {}
 db.execute("CREATE TABLE IF NOT EXISTS lyrics (track_id TEXT PRIMARY KEY, synced TEXT, plain TEXT)")

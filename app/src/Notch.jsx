@@ -4,7 +4,7 @@ import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { pimg, PluginSection, pluginSections, usePlugins } from "./Plugins";
-import { condition, score, signed, WeatherIcon } from "./widgets";
+import { condition, WeatherIcon } from "./widgets";
 
 const pad = (n) => String(n).padStart(2, "0");
 const clock = (ms) => `${Math.floor(ms / 60000)}:${pad(Math.floor(ms / 1000) % 60)}`;
@@ -42,7 +42,6 @@ const ICONS = {
   play: "M8 5v14l11-7z",
   pause: "M7 5h4v14H7zM13 5h4v14h-4z",
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8z",
-  valorant: "M2 4l11 14H8.5L2 9.6zM22 4v6l-4.6 5.5h-4.7z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
   wifi: "M12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM7.8 14.6a6 6 0 0 1 8.4 0l-1.4 1.4a4 4 0 0 0-5.6 0zM4.9 11.7a10 10 0 0 1 14.2 0l-1.4 1.4a8 8 0 0 0-11.4 0zM2 8.8a14 14 0 0 1 20 0l-1.4 1.4a12 12 0 0 0-17.2 0z",
   nowifi: "M3.3 2 22 20.7l-1.4 1.4-7.2-7.2A4 4 0 0 0 9.2 16l-1.4-1.4a6 6 0 0 1 3.6-1.7L9 10.5a10 10 0 0 0-4.1 2.6l-1.4-1.4A12 12 0 0 1 7.4 9L5.1 6.7A14 14 0 0 0 2 9.2L.6 7.8A16 16 0 0 1 3.6 5.2L1.9 3.4zM12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM12 5a16 16 0 0 1 11.4 4.8L22 11.2A14 14 0 0 0 10.6 7.1z",
@@ -84,7 +83,7 @@ const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
 const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
 const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
-  outputs: "speaker", mixer: "speaker", brightness: "sun", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
+  outputs: "speaker", mixer: "speaker", brightness: "sun", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", steam: "controller" };
 
 // A volume or brightness slider: drag or click anywhere on it. `every` limits how often it reports while dragging.
 function Slider({ value, onChange, every = 40 }) {
@@ -118,7 +117,7 @@ function soon(e, now) {
   return day + hm(s);
 }
 
-function activities(timer, ev, v, now) {
+function activities(timer, ev, now) {
   const out = [];
   if (timer?.end > now) {
     const f = timer.mode === "focus";
@@ -128,14 +127,6 @@ function activities(timer, ev, v, now) {
   if (e) {
     const m = Math.ceil((parse(e.start) - now) / 60000);
     out.push({ id: "cal", icon: <Icon d="calendar" />, tone: "#ff453a", label: e.title, value: m > 0 ? `in ${m} min` : "Now", short: m > 0 ? `${m}m` : "Now" });
-  }
-  const m = v?.matches?.[0], end = m && m.started_at + m.length;
-  if (m && now > end && now - end < 10 * 60000) {
-    const res = m.won == null ? "Draw" : m.won ? "Win" : "Loss";
-    const rr = m.mode === "Competitive" && m.rr != null;
-    const icon = v.assets.tiers[m.tier]?.icon;
-    out.push({ id: "val", icon: icon ? <img src={icon} draggable={false} /> : <Icon d="timer" />, tone: m.won == null ? "#aaa" : m.won ? "#30d158" : "#ff453a",
-      label: `${res} ${score(m)} · ${m.map}`, value: rr ? `${signed(m.rr)} RR` : `${m.kills}/${m.deaths}/${m.assists}`, short: rr ? signed(m.rr) : res });
   }
   return out;
 }
@@ -178,7 +169,6 @@ export default function Notch() {
   const o = (opts.current = notchOptions(set));
   const on = (id) => o.sections.includes(id);
   const ev = usePoll(set?.calendars?.length ? "/calendar" : null, 300000);
-  const val = usePoll(set?.valorant ? "/valorant" : null, 60000);
   const weather = usePoll("/weather", 900000);
   const pc = usePoll(open && on("pc") ? "/system" : null, 2000);
   useEffect(() => {
@@ -187,8 +177,7 @@ export default function Notch() {
   const today = usePoll(open && on("listening") ? "/today" : null, 60000);
   const streak = usePoll(open && on("listening") ? "/streaks" : null, 600000);
   const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
-  const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
-  const [storeAlert, setStoreAlert] = useState(null);
+
   const plug = usePlugins();
   const pSecs = pluginSections(plug); // [id, title, plugin, section]
   const [pAlerts, setPAlerts] = useState([]); // alerts from plugins, each shown for 20 s
@@ -219,10 +208,6 @@ export default function Notch() {
   const mics = [...new Set([...(pcl?.mic || []), ...micApps.map(appName)])];
   const cams = [...new Set([...(pcl?.cam || []), ...camApps.map(appName)])];
   const pcActs = [];
-  if (storeAlert && storeAlert.until > ms) {
-    pcActs.push({ id: "vstore", icon: storeAlert.icon ? <img src={storeAlert.icon} draggable={false} /> : <Icon d="controller" />, tone: "#ff4655",
-      label: `${storeAlert.name} is in your store`, value: `${storeAlert.price} VP`, short: "Store" });
-  }
   if (saleAlert && saleAlert.until > ms) {
     pcActs.push({ id: "sale", icon: <Icon d="controller" />, tone: "#66c0f4", label: `${saleAlert.name} is ${saleAlert.discount}% off`,
       value: saleAlert.price || `-${saleAlert.discount}%`, short: `-${saleAlert.discount}%` });
@@ -255,7 +240,7 @@ export default function Notch() {
     id: "net", icon: <Icon d="download" />, tone: "#0a84ff", label: "Network", value: `↓ ${bytes(net.down)}/s · ↑ ${bytes(net.up)}/s`,
     short: `${bytes(Math.max(net.down, net.up))}/s`,
   };
-  const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, val, ms), ...(dlAct ? [dlAct] : []), ...(netAct ? [netAct] : [])];
+  const acts = [...(signin ? [signin] : []), ...pcActs, ...activities(tm, ev, ms), ...(dlAct ? [dlAct] : []), ...(netAct ? [netAct] : [])];
   const pos = has ? Math.min(now.duration_ms, now.progress_ms + (now.playing ? ms - now.at : 0)) : 0;
   const ly = useLyrics(has && !now.other ? now.id : null, pos, now?.duration_ms);
   const line = o.lyrics && playing && ly.synced && ly.i >= 0 ? ly.lines[ly.i][1] || "♪" : null;
@@ -436,17 +421,6 @@ export default function Notch() {
     } catch {}
     setSaleAlert({ ...fresh[0], until: Date.now() + 20000 });
   }, [wish]);
-  // A wishlisted skin in today's store or the night market: tell once per shop rotation.
-  useEffect(() => {
-    const hit = [...(vstore?.daily || []), ...(vstore?.night || [])].find((s) => s.wanted);
-    if (!hit) return;
-    const key = hit.id + ":" + Math.round(vstore.daily_ends || 0);
-    if (stored("val-store-alert") === key) return;
-    try {
-      localStorage.setItem("val-store-alert", JSON.stringify(key));
-    } catch {}
-    setStoreAlert({ ...hit, until: Date.now() + 20000 });
-  }, [vstore]);
   useEffect(() => {
     if (!o.alerts) return;
     const load = () => !hidden && get("/plugins/alerts?after=" + lastAlert.current).then((list) => {
@@ -614,7 +588,6 @@ export default function Notch() {
     notifications: notifList.length ? `${notifList.length} from today` : "Messages from your apps",
     shelf: shelf.length ? `${shelf.length} on the shelf` : "Drag files onto the notch",
     todos: openTodos.length ? `${openTodos.length} left` : "Your to-do list",
-    valorant: "Right after a match",
     ...Object.fromEntries(pSecs.map(([id, , p]) => [id, `From the ${p.name} plugin`])),
     steam: steamD?.connected && !steamD.error && !steamD.private ? `${steamD.friends.length} friends online` : "Friends online and in game",
   };
@@ -925,17 +898,6 @@ export default function Notch() {
         <div className="n-th"><Icon d="check" />To do<em>{openTodos.length} left</em></div>
         {openTodos.slice(0, 3).map(([t, i]) => (
           <button key={i} className="n-todo" onClick={() => tickTodo(i)}><i />{t.text}</button>
-        ))}
-      </div>
-    ),
-    valorant: acts.some((a) => a.id === "val") && (
-      <div className="n-acts">
-        {acts.filter((a) => a.id === "val").map((a) => (
-          <div key={a.id} className="n-act">
-            <span className="n-icon" style={{ color: a.tone }}>{a.icon}</span>
-            <span className="n-title">{a.label}</span>
-            <b style={{ color: a.tone }}>{a.value}</b>
-          </div>
         ))}
       </div>
     ),
