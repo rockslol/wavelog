@@ -5808,3 +5808,250 @@ button.n-dl:hover {
   text-align: right;
   color: rgba(255, 255, 255, 0.7);
 }
+
+/* --- Plugins: blocks ------------------------------------------------------------------------------------------- */
+.pb-header .img.big {
+  object-fit: cover;
+}
+.pb-right {
+  margin-left: auto;
+  padding-left: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.pb-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .pb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.pb-card {
+  --tint: #8a8a8a;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 12px 11px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tint) 24%, transparent), rgba(255, 255, 255, 0.04) 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 32%, transparent);
+}
+.pb-card.clickable {
+  cursor: pointer;
+}
+.pb-card.clickable:hover {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tint) 34%, transparent), rgba(255, 255, 255, 0.07) 70%);
+}
+.pb-card.on {
+  box-shadow: inset 0 0 0 2px #ff4655, 0 0 24px -6px #ff4655;
+}
+.pb-card.on .vheart {
+  color: #ff4655;
+}
+.pb-card img, .pb-noimg {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 5px;
+  border-radius: 10px;
+  object-fit: contain;
+}
+.pb-noimg {
+  background: rgba(255, 255, 255, 0.05);
+}
+.pb-sub {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pb-badge {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 1;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+}
+.pb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.list .pb-chips {
+  gap: 4px;
+  margin-top: 5px;
+}
+.pb-chip {
+  --c: #ffffff;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--c) 70%, #fff);
+}
+.list .pb-chip {
+  padding: 1px 7px;
+  font-size: 11px;
+}
+.pb-chip.clickable {
+  cursor: pointer;
+}
+.pb-chip.clickable:hover {
+  background: color-mix(in srgb, var(--c) 28%, transparent);
+}
+.pb-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pb-text {
+  margin: 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.vhits small {
+  color: var(--text-2);
+}
+.vhits b {
+  flex: none;
+  color: #ff4655;
+}
+.pb-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 105, 97, 0.4);
+}
+.pb-error b {
+  color: #ff6961;
+}
+.pb-error-line {
+  margin: 0 4px;
+  font-size: 12.5px;
+  color: #ff6961;
+}
+.side-main .pl-tab img {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  object-fit: contain;
+  opacity: 0.85;
+}
+.side-main .pl-tab.on img {
+  opacity: 1;
+}
+
+/* --- Settings > Plugins ---------------------------------------------------------------------------------------- */
+.pl-drop {
+  border: 1.5px dashed transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.pl-drop.over {
+  border-color: hsl(var(--ah) var(--as) 65%);
+  background: hsl(var(--ah) var(--as) 50% / 0.1);
+}
+.pl-path {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 4px;
+}
+.pl-path input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  font: inherit;
+  font-size: 13px;
+  color: #fff;
+  outline: none;
+}
+.pl-path input:focus {
+  background: rgba(255, 255, 255, 0.11);
+}
+.pl-msg {
+  margin: 4px 0 2px;
+}
+.pl-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.pl-name img, .pl-noicon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.pl-noicon {
+  background: rgba(255, 255, 255, 0.1);
+}
+.pl-badge {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(255, 214, 10, 0.16);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+  color: #ffd60a;
+}
+.pl-card.off .pl-name {
+  opacity: 0.6;
+}
+.pl-error {
+  margin: 2px 0 6px;
+  font-size: 12.5px;
+  color: #ff6961;
+  word-break: break-word;
+}
+.pl-error.soft {
+  color: #ff9f0a;
+}
+.pl-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 0 2px;
+}
+.pl-foot .grow {
+  flex: 1;
+}
+.link.danger {
+  color: #ff6961;
+}
+.pl-confirm {
+  box-shadow: inset 0 0 0 1px hsl(var(--ah) var(--as) 60% / 0.5);
+}
+.pl-desc {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.pl-uses {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.pl-warn {
+  margin: 0 0 4px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 159, 10, 0.12);
+  font-size: 12.5px;
+  color: #ffc66e;
+}

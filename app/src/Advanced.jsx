@@ -117,7 +117,7 @@ export function Advanced() {
       <h4>Background jobs</h4>
       <section className="card group">
         {jobs.length ? jobs.map(([k, j]) => (
-          <Row key={k} label={<span className="dot-label"><i className={j.error ? "bad" : j.last_ok ? "ok" : "idle"} />{JOBS[k] || k}</span>}
+          <Row key={k} label={<span className="dot-label"><i className={j.error ? "bad" : j.last_ok ? "ok" : "idle"} />{JOBS[k] || (k.startsWith("plugin:") ? k.slice(7).replace(".", ": ") + " (plugin)" : k)}</span>}
             hint={j.error ? j.error : `Last ran ${ago(j.last_run)} · ${fmt(j.runs)} ${j.runs === 1 ? "run" : "runs"}${j.fails ? ` · ${fmt(j.fails)} failed` : ""}`}>
             <span className="hint">{j.error ? `Last worked ${ago(j.last_ok)}` : ""}</span>
           </Row>

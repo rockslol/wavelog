@@ -28,6 +28,7 @@ import share
 import spotify
 import steam
 import notifs
+import plugins
 import shelf
 import valorant
 import widgets
@@ -43,7 +44,9 @@ async def lifespan(app):
              asyncio.create_task(poller.loop(lastfm.auto, 1800)),
              asyncio.create_task(poller.loop(valorant.sync, lambda: 120 if valorant.in_valorant() else 900)),
              asyncio.create_task(poller.loop(valorant.watch, 15))]
+    await plugins.start_all()
     yield
+    await plugins.stop_all()
     for t in tasks:
         t.cancel()
 
@@ -63,6 +66,7 @@ app.include_router(pcwatch.router)
 app.include_router(steam.router)
 app.include_router(notifs.router)
 app.include_router(shelf.router)
+app.include_router(plugins.router)
 
 
 @app.get("/login")

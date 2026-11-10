@@ -10,6 +10,7 @@ import { installUpdate, startUpdateChecks, useUpdate } from "./update";
 import Columns from "./Columns";
 import { CalendarHeat, HourHeat } from "./Heat";
 import { Rounds, result, score, signed } from "./widgets";
+import { Blocks, PluginSettings, pimg, usePlugins } from "./Plugins";
 
 const Open = createContext(() => {});
 
@@ -218,6 +219,8 @@ Object.assign(NAV_ICONS, {
   "s-accounts": "M12 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM3.5 21a8.5 8.5 0 0 1 17 0z",
   "s-places": "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
   "s-advanced": "M3 4h18v16H3zm2 2v12h14V6zm2 2 4 4-4 4-1.4-1.4L8.2 12 5.6 9.4zM12 15h6v2h-6z",
+  plugin: "M10 3a2 2 0 0 1 4 0v1h4a1 1 0 0 1 1 1v4h1a2 2 0 0 1 0 4h-1v4a1 1 0 0 1-1 1h-4v-1a2 2 0 0 0-4 0v1H6a1 1 0 0 1-1-1v-4h1a2 2 0 0 0 0-4H5V5a1 1 0 0 1 1-1h4z",
+  "s-plugins": "M10 3a2 2 0 0 1 4 0v1h4a1 1 0 0 1 1 1v4h1a2 2 0 0 1 0 4h-1v4a1 1 0 0 1-1 1h-4v-1a2 2 0 0 0-4 0v1H6a1 1 0 0 1-1-1v-4h1a2 2 0 0 0 0-4H5V5a1 1 0 0 1 1-1h4z",
   "s-about": "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM11 10h2v7h-2zM11 7h2v2h-2z",
 });
 const NavIcon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={NAV_ICONS[d]} /></svg>;
@@ -255,6 +258,9 @@ function Sidebar({ tab, setTab, detail }) {
   const lfS = usePoll(inSettings ? "/lastfm" : null, 30000);
   const stS = usePoll(inSettings ? "/steam" : null, 60000);
   const accs = accountStates(now, lfS, stS);
+  const plug = usePlugins();
+  const pluginTabs = (plug?.plugins || []).filter((p) => p.enabled && !p.error)
+    .flatMap((p) => p.pages.map((pg) => [`p.${p.id}.${pg.id}`, pg.title, p.icon]));
   const accOk = accs.filter(([, st]) => st === "ok").length, accBad = accs.some(([, st]) => st === "bad");
   const auth = now?.auth && now.auth !== "ok" ? now.auth : null;
   const last = useRef("overview");
@@ -286,7 +292,14 @@ function Sidebar({ tab, setTab, detail }) {
           ))}
         </nav>
       ) : (
-        <nav className="side-main" key="main">{TABS.filter(([k]) => k !== "settings").map(item)}</nav>
+        <nav className="side-main" key="main">
+          {TABS.filter(([k]) => k !== "settings").map(item)}
+          {pluginTabs.map(([k, label, icon]) => (
+            <button key={k} className={"pl-tab" + (tab === k && !detail ? " on" : "")} onClick={() => setTab(k)} title={label}>
+              {icon ? <img src={pimg(icon)} draggable={false} /> : <NavIcon d="plugin" />}<span>{label}</span>
+            </button>
+          ))}
+        </nav>
       )}
       <div className="grow" />
       {auth && (
@@ -1318,7 +1331,7 @@ export const Switch = ({ on, onChange }) => (
 const PAGE_GROUPS = [
   ["App", [["general", "General"], ["look", "Appearance"]]],
   ["On screen", [["widgets", "Widgets"], ["notch", "Notch"], ["pc", "Your PC"], ["sound", "Sound"]]],
-  ["Connected", [["accounts", "Accounts"], ["valorant", "Valorant"], ["places", "Calendar & photos"]]],
+  ["Connected", [["accounts", "Accounts"], ["valorant", "Valorant"], ["places", "Calendar & photos"], ["plugins", "Plugins"]]],
   ["More", [["productivity", "Productivity"], ["advanced", "Advanced"], ["about", "About"]]],
 ];
 const PAGES = PAGE_GROUPS.flatMap(([, list]) => list);
@@ -1333,6 +1346,7 @@ const PAGE_INFO = {
   accounts: "Spotify, Last.fm and Steam, and whether each one works",
   valorant: "The tracker, the Tab panel in matches and the widget",
   places: "Weather, calendars and photos for the widgets and the notch",
+  plugins: "Add pages and features made by you or other people, and turn them on or off",
   productivity: "Countdowns, to-dos, the note and the focus timer",
   advanced: "Status, logs and fixes for when something's off",
   about: "Version, updates and where to report problems",
@@ -1358,12 +1372,14 @@ const WORDS = {
   "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Replace Windows' volume pop-up": "osd flyout hide volume keys", "Record other players": "youtube log history stats",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
+  "Install a plugin": "addon add-on extension mod zip", "Load a folder": "developer dev plugin make your own reload",
 };
 const EXTRA = [
   ["advanced", "Status", "Logger", "Restart it, version and port"], ["advanced", "Status", "Database", "Back up now"],
   ["advanced", "Status", "Data folder", "Where your plays are stored"], ["advanced", "Log", "Log", "Warnings and errors"],
   ["advanced", "Developer", "Developer tools", "Inspect this window"], ["advanced", "Developer", "Detailed logging", "Debug"],
   ["advanced", "Developer", "Clear caches", "Album colours, photos and weather"], ["advanced", "Developer", "Copy diagnostics", "For bug reports"],
+  ["plugins", "", "Install a plugin", "Drop a folder or .zip"], ["plugins", "Developer mode", "Load a folder", "Make your own plugin"],
   ["about", "", "Updates", "Check for a new version"], ["about", "Project", "Source code", "GitHub"],
   ["about", "Project", "Report a problem", "Bug, issue"], ["about", "Project", "License", "MIT"],
 ].map(([page, sec, label, hint]) => ({ page, sec, label, hint }));
@@ -1606,6 +1622,7 @@ function Settings({ tab, setTab }) {
   const acc = accountStates(nowA, lf, steamD);
   const pages = s && {
     advanced: <Advanced />,
+    plugins: <PluginSettings setTab={setTab} />,
     about: <About />,
     notch: <>
       <section className="card group">
@@ -1932,9 +1949,53 @@ function Settings({ tab, setTab }) {
   );
 }
 
+// A page from a plugin, drawn from the blocks it sends.
+function PluginTab({ tab, setTab }) {
+  const [, pid, page] = tab.split(".");
+  const plug = usePlugins();
+  const p = plug?.plugins.find((x) => x.id === pid);
+  const pg = p?.pages.find((x) => x.id === page);
+  const [range, setRange] = useState("week");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(false);
+  const ready = !!(p && pg && p.enabled && !p.error);
+  const path = ready ? `/p/${pid}/page/${page}${pg.ranges ? "?range=" + range : ""}` : null;
+  const load = () => path && get(path).then((d) => (setData(d), setError(false))).catch(() => setError(true));
+  useEffect(() => {
+    setData(null);
+    if (!path) return;
+    load();
+    const id = setInterval(() => !document.hidden && load(), 30000);
+    return () => clearInterval(id);
+  }, [path]);
+  const head = (
+    <Header tab={tab} setTab={setTab} title={pg?.title || p?.name || "Plugin"}>
+      {pg?.ranges && <Segmented options={RANGES} value={range} onChange={setRange} />}
+    </Header>
+  );
+  if (plug && !ready) return (
+    <>
+      {head}
+      <div className="body">
+        <section className="card wrapped-hero">
+          <h2>{!p ? "This plugin isn't installed" : p.error ? "This plugin couldn't start" : !p.enabled ? `${p.name} is off` : "This page is gone"}</h2>
+          <p className="hint">{p?.error || "Turn plugins on and off in Settings → Plugins."}</p>
+          <button className="primary" onClick={() => {
+            try {
+              localStorage.setItem("settingsPage", "plugins");
+            } catch {}
+            setTab("settings");
+          }}>Plugins</button>
+        </section>
+      </div>
+    </>
+  );
+  return <>{head}{!data ? <Status error={error} /> : <div className="body"><Blocks pid={pid} blocks={data} reload={load} /></div>}</>;
+}
+
 export default function Stats() {
   const hash = location.hash.slice(1).split("/");
-  const [tab, setTabRaw] = useState(["overview", "wrapped", "gaming", "valorant", "lyrics", "settings"].includes(hash[0]) ? hash[0] : "overview");
+  const [tab, setTabRaw] = useState(["overview", "wrapped", "gaming", "valorant", "lyrics", "settings"].includes(hash[0]) || hash[0].startsWith("p.") ? hash[0] : "overview");
   const [detail, setDetail] = useState(hash[1] ? { kind: hash[0], id: hash[1] } : null);
   const setTab = (t) => (setDetail(null), setTabRaw(t));
   useEffect(() => {
@@ -1950,7 +2011,7 @@ export default function Stats() {
     const offs = [listen("open-settings", () => setTab("settings")), listen("open-detail", (e) => (setDetail(e.payload), window.scrollTo(0, 0)))];
     return () => ((stop = true), offs.forEach((o) => o.then((f) => f())));
   }, []);
-  const View = { overview: Overview, wrapped: Wrapped, gaming: Gaming, valorant: ValorantTab, lyrics: LyricsView, settings: Settings }[tab];
+  const View = tab.startsWith("p.") ? PluginTab : { overview: Overview, wrapped: Wrapped, gaming: Gaming, valorant: ValorantTab, lyrics: LyricsView, settings: Settings }[tab];
   const open = (d) => (setDetail(d), window.scrollTo(0, 0));
   return (
     <Open.Provider value={open}>
