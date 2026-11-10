@@ -72,10 +72,12 @@ class Plugin:
             return fn
         return add
 
-    def overlay(self, game, key="Tab"):
-        """A panel shown while `key` is held in `game` (its exe name)."""
+    def overlay(self, game, key="Tab", width=740, height=200):
+        """A panel shown while `key` is held in `game` (its exe name, e.g. "VALORANT-Win64-Shipping.exe"). It's read
+        each time the key goes down. The game needs Windowed Fullscreen (borderless) for anything to show over it.
+        Keys: "Tab", "Alt", "Ctrl", "Shift", "Space", "CapsLock", "F1".."F12", "A".."Z", "0".."9"."""
         def add(fn):
-            self.overlays.append((fn, game, key))
+            self.overlays.append((fn, game, key, width, height))
             return fn
         return add
 
@@ -84,6 +86,8 @@ class Plugin:
         return fn
 
     def duck(self, fn):
+        """Return True while Spotify should be quieter (e.g. during a match). Asked every few seconds, so keep it quick.
+        The user can turn it off per plugin in Settings > Sound."""
         self.ducks.append(fn)
         return fn
 

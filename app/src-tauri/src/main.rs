@@ -62,7 +62,7 @@ fn shown(label: &str) -> bool {
 
 fn sync(app: &AppHandle) {
     for (label, w) in app.webview_windows() {
-        if label == "stats" || label == "tabpanel" {
+        if label == "stats" || label == "tabpanel" || label.starts_with("po_") {
             continue;
         }
         let (on, over) = (shown(&label), shown(&label) && !visible());
@@ -82,7 +82,13 @@ fn sync(app: &AppHandle) {
 }
 
 fn on_desk(label: &str) -> bool {
-    !matches!(label, "stats" | "tabpanel" | "notch")
+    !matches!(label, "stats" | "tabpanel" | "notch") && !label.starts_with("po_")
+}
+
+/// Plugin windows are named p_<plugin>_<widget> (widgets) and po_<plugin>_<overlay>. Labels end up in file names
+/// (saved positions), so only letters, digits, - and _.
+fn plugin_label(l: &str, prefix: &str) -> bool {
+    l.starts_with(prefix) && l.len() < 90 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 fn class_is_desktop(h: HWND) -> bool {
@@ -611,7 +617,7 @@ fn ducker() {
     use std::time::Instant;
     let mut cfg = DuckCfg { calls: false, videos: false, valorant: false, games: false, level: 0.25 };
     let (mut cfg_at, mut state_at): (Option<Instant>, Option<Instant>) = (None, None);
-    let (mut in_match, mut in_game) = (false, false);
+    let (mut in_match, mut in_game, mut in_plugin) = (false, false, false);
     let (mut loud_start, mut loud_last): (Option<Instant>, Option<Instant>) = (None, None);
     let mut set_to: Option<f32> = None; // what we set while ducked
     let mut overridden = false; // the user moved the volume during a dip: leave it alone until the dip ends
@@ -624,11 +630,13 @@ fn ducker() {
             }
         }
         let on = cfg.calls || cfg.videos || cfg.valorant || cfg.games;
-        if (cfg.valorant || cfg.games) && state_at.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
+        // Every 5 s, also with the built-in reasons off: a plugin can ask for it too (its switch is in Settings > Sound).
+        if state_at.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
             state_at = Some(Instant::now());
             if let Some(j) = http_get("/duck/state") {
                 in_match = j["valorant"] == "INGAME";
                 in_game = j["game"].is_string();
+                in_plugin = j["plugins"] == true;
             }
         }
         let call = cfg.calls && session_apps(windows::Win32::Media::Audio::eCapture, false).iter().any(|a| CALL_APPS.contains(&a.to_lowercase().as_str()));
@@ -641,7 +649,7 @@ fn ducker() {
             }
             loud_start.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) // ignore short sounds
         };
-        let want = on && (call || video || (cfg.valorant && in_match) || (cfg.games && in_game));
+        let want = (on && (call || video || (cfg.valorant && in_match) || (cfg.games && in_game))) || in_plugin;
 
         let sessions = spotify_sessions();
         match (sessions.first().and_then(|s| unsafe { s.GetMasterVolume() }.ok()), want) {
@@ -675,7 +683,7 @@ fn ducker() {
                 }
             }
         }
-        thread::sleep(Duration::from_millis(if on { 500 } else { 3000 }));
+        thread::sleep(Duration::from_millis(if on || in_plugin { 500 } else { 3000 }));
     }
 }
 
@@ -1349,7 +1357,15 @@ async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<
     let k = scale.unwrap_or(1.0).clamp(0.5, 1.5);
     SCALE.store(k.to_bits(), Relaxed);
     let (mut x, mut y) = (24.0, 24.0);
-    for label in WIDGETS {
+    // Built-in widgets, then plugin widgets: the ones asked for and any still open (so they get closed).
+    let mut labels: Vec<String> = WIDGETS.iter().map(|l| l.to_string()).collect();
+    let open: Vec<String> = app.webview_windows().into_keys().collect();
+    for l in list.iter().map(|(l, _)| l).chain(open.iter()) {
+        if plugin_label(l, "p_") && !labels.contains(l) {
+            labels.push(l.clone());
+        }
+    }
+    for label in labels.iter().map(String::as_str) {
         let want = list.iter().find(|(l, _)| l == label).map(|(_, size)| dims(size)).map(|(w, h)| (w * k, h * k));
         match (app.get_webview_window(label), want) {
             (Some(win), None) => {
@@ -1477,6 +1493,80 @@ fn tab_panel(app: &AppHandle) {
     }
 }
 
+// ---- Plugin overlays -----------------------------------------------------------------------------------------
+// A plugin panel shown while a key is held in a game: (window label, game exe in lowercase, virtual key, width, height).
+static OVERLAYS: Mutex<Vec<(String, String, u16, f64, f64)>> = Mutex::new(Vec::new());
+
+fn vk(key: &str) -> Option<u16> {
+    let k = key.trim().to_ascii_uppercase();
+    Some(match k.as_str() {
+        "TAB" => 0x09,
+        "ALT" => 0x12,
+        "CTRL" | "CONTROL" => 0x11,
+        "SHIFT" => 0x10,
+        "SPACE" => 0x20,
+        "CAPSLOCK" => 0x14,
+        _ if k.len() == 1 && k.chars().all(|c| c.is_ascii_alphanumeric()) => k.as_bytes()[0] as u16,
+        _ if k.len() <= 3 && k.starts_with('F') => match k[1..].parse::<u16>() {
+            Ok(n) if (1..=12).contains(&n) => 0x6F + n,
+            _ => return None,
+        },
+        _ => return None,
+    })
+}
+
+#[tauri::command]
+fn set_overlays(app: AppHandle, list: Vec<(String, String, String, f64, f64)>) {
+    let list: Vec<_> = list.into_iter().filter(|o| plugin_label(&o.0, "po_"))
+        .filter_map(|(l, exe, key, w, h)| Some((l, exe.to_lowercase(), vk(&key)?, w.clamp(200.0, 1600.0), h.clamp(80.0, 900.0)))).collect();
+    for (label, w) in app.webview_windows() {
+        if label.starts_with("po_") && !list.iter().any(|o| o.0 == label) {
+            let _ = w.destroy();
+        }
+    }
+    *OVERLAYS.lock().unwrap() = list;
+}
+
+fn plugin_overlays(app: &AppHandle) {
+    use windows_sys::Win32::UI::{Input::KeyboardAndMouse::GetAsyncKeyState, WindowsAndMessaging::*};
+    let mut showing: Option<String> = None;
+    loop {
+        let list = OVERLAYS.lock().unwrap().clone();
+        let exe = if !list.is_empty() && FULLSCREEN.load(Relaxed) && SHOWN.load(Relaxed) {
+            let mut pid = 0;
+            unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut pid) };
+            exe_name(pid).to_lowercase()
+        } else {
+            String::new()
+        };
+        let active: Vec<_> = list.iter().filter(|o| !exe.is_empty() && o.1 == exe).collect();
+        for o in &active {
+            if app.get_webview_window(&o.0).is_none() {
+                if let Ok(w) = base(app, &o.0, "Wavelog plugin overlay".into(), o.3, o.4).always_on_top(true).visible(false).build() {
+                    let _ = w.set_ignore_cursor_events(true);
+                    no_activate(&w);
+                }
+            }
+        }
+        let down = active.iter().find(|o| unsafe { GetAsyncKeyState(o.2 as i32) } < 0).map(|o| o.0.clone());
+        if down != showing {
+            if let Some(w) = showing.as_ref().and_then(|l| app.get_webview_window(l)) {
+                let _ = app.emit_to(w.label(), "visibility", false);
+                let _ = w.hide();
+            }
+            if let Some(w) = down.as_ref().and_then(|l| app.get_webview_window(l)) {
+                let _ = app.emit_to(w.label(), "visibility", true);
+                if let Ok(h) = w.hwnd() {
+                    place(h.0 as _);
+                    unsafe { ShowWindow(h.0 as _, SW_SHOWNOACTIVATE) };
+                }
+            }
+            showing = down;
+        }
+        thread::sleep(Duration::from_millis(if active.is_empty() { 400 } else { 30 }));
+    }
+}
+
 fn fullscreen_foreground() -> bool {
     use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*};
     unsafe {
@@ -1516,7 +1606,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness, set_overlays])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());
@@ -1558,6 +1648,8 @@ fn main() {
 
             let handle = app.handle().clone();
             thread::spawn(move || tab_panel(&handle));
+            let handle = app.handle().clone();
+            thread::spawn(move || plugin_overlays(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || notch_hover(&handle));
             let handle = app.handle().clone();

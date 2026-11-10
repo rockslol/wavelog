@@ -6055,3 +6055,148 @@ button.n-dl:hover {
   font-size: 12.5px;
   color: #ffc66e;
 }
+
+/* --- Plugin blocks in small places: desktop widgets, the notch, overlays over games ----------------------------
+   No cards inside cards: sections go flat, and everything is a bit smaller. */
+.pwidget {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+}
+.pwidget > *, .n-plugin > *, .po > * {
+  flex: none;
+}
+.pwidget .card, .n-plugin .card, .po .card {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.pwidget .head, .n-plugin .head, .po .head {
+  margin-bottom: 6px;
+}
+.pwidget h3, .n-plugin h3, .po h3 {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+.light .pwidget h3 {
+  color: rgba(0, 0, 0, 0.5);
+}
+.pwidget .hint, .n-plugin .hint, .po .hint {
+  font-size: 11px;
+}
+.pwidget .spotlight, .n-plugin .spotlight, .po .spotlight {
+  gap: 10px;
+}
+.pwidget .spotlight h2, .n-plugin .spotlight h2, .po .spotlight h2 {
+  margin: 0;
+  font-size: 17px;
+}
+.pwidget .img.big, .n-plugin .img.big, .po .img.big {
+  width: 52px;
+  height: 52px;
+}
+.pwidget .wrapped-hero h2, .n-plugin .wrapped-hero h2, .po .wrapped-hero h2 {
+  font-size: 15px;
+}
+.pwidget .tiles, .n-plugin .tiles, .po .tiles {
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 6px;
+}
+.pwidget .tile, .n-plugin .tile, .po .tile {
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.light .pwidget .tile {
+  background: rgba(0, 0, 0, 0.06);
+}
+.pwidget .tile .label, .n-plugin .tile .label, .po .tile .label {
+  font-size: 10.5px;
+}
+.pwidget .tile .value, .n-plugin .tile .value, .po .tile .value {
+  margin: 2px 0 0;
+  font-size: 16px;
+  -webkit-line-clamp: 1;
+}
+.pwidget .list, .n-plugin .list, .po .list {
+  gap: 6px;
+}
+.pwidget .list li, .n-plugin .list li, .po .list li {
+  gap: 8px;
+  font-size: 12.5px;
+}
+.pwidget .list .img, .n-plugin .list .img, .po .list .img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.pwidget .meter, .n-plugin .meter, .po .meter {
+  display: none;
+}
+.pwidget .pb-grid, .n-plugin .pb-grid, .po .pb-grid {
+  grid-template-columns: repeat(min(var(--cols, 4), 4), minmax(0, 1fr));
+  gap: 6px;
+}
+.pwidget .pb-card, .n-plugin .pb-card, .po .pb-card {
+  padding: 7px;
+  border-radius: 12px;
+}
+.pwidget .vheart, .n-plugin .vheart, .po .vheart {
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 22px;
+}
+.pwidget .vname, .n-plugin .vname, .po .vname {
+  font-size: 11.5px;
+}
+.pwidget .grid2, .pwidget .grid3, .n-plugin .grid2, .n-plugin .grid3, .po .grid2, .po .grid3 {
+  gap: 10px;
+}
+.pwidget .pb-text, .n-plugin .pb-text, .po .pb-text {
+  margin: 0;
+  font-size: 12px;
+}
+.pwidget .pb-buttons .pill, .n-plugin .pb-buttons .pill {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+/* Charts and search boxes need room: not in a small widget or over a game */
+.size-s.pwidget .chart, .po .chart, .po .vsearch {
+  display: none;
+}
+.pw-off {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: auto 0;
+  font-size: 12px;
+}
+.pw-off span {
+  color: var(--text-2);
+}
+.n-plugin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.n-act img, .n-bubble img, .n-mini .n-icon img, .n-eic img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.po {
+  gap: 10px;
+  padding: 14px 16px;
+}

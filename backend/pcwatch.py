@@ -607,5 +607,7 @@ async def duck_state():
     """For Spotify ducking in the app: Valorant's match phase and the fullscreen game in front, if any."""
     import games
     import valorant
+    import plugins
     g = games.game()
-    return {"valorant": valorant.live_cache.get("phase") if valorant.in_valorant() else None, "game": g[0] if g else None}
+    return {"valorant": valorant.live_cache.get("phase") if valorant.in_valorant() else None, "game": g[0] if g else None,
+            "plugins": await plugins.ducking()}

@@ -10,7 +10,7 @@ import { installUpdate, startUpdateChecks, useUpdate } from "./update";
 import Columns from "./Columns";
 import { CalendarHeat, HourHeat } from "./Heat";
 import { Rounds, result, score, signed } from "./widgets";
-import { Blocks, PluginSettings, pimg, usePlugins } from "./Plugins";
+import { Blocks, loadPlugins, PluginSettings, pimg, pluginList, pluginOverlays, pluginSections, pluginWidgets, send, usePlugins } from "./Plugins";
 
 const Open = createContext(() => {});
 
@@ -1316,7 +1316,9 @@ const ALL = [...WIDGETS, ["stack", "Widget stack"], ["notch", "Notch"]];
 const SIZES = [["s", "Small"], ["m", "Medium"], ["l", "Large"]];
 
 function applyWidgets(s) {
-  const list = s.widgets.map((w) => [w, s.sizes?.[w] || "m"]);
+  // Plugin widgets only while their plugin runs (until the list has loaded, keep them as they are).
+  const pl = pluginList(), ok = pl && new Set(pluginWidgets(pl).map(([id]) => id));
+  const list = s.widgets.filter((w) => !w.startsWith("p_") || !ok || ok.has(w)).map((w) => [w, s.sizes?.[w] || "m"]);
   try {
     localStorage.setItem("widgets", JSON.stringify(list));
     localStorage.setItem("scale", String(s.scale ?? 1));
@@ -1599,13 +1601,17 @@ function Settings({ tab, setTab }) {
   });
 
   const n = notchOptions(s);
+  const plug = usePlugins();
+  const pWidgets = pluginWidgets(plug), pSections = pluginSections(plug);
+  const pDucks = (plug?.plugins || []).filter((p) => p.enabled && !p.error && p.ducks);
   const [mons, setMons] = useState([]);
   useEffect(() => {
     invoke("monitors").then(setMons).catch(() => {});
   }, []);
   const setN = (patch) => set({ notch: { ...n, ...patch } });
   const nSwitch = (k) => <Switch on={n[k]} onChange={() => setN({ [k]: !n[k] })} />;
-  const sections = [...n.sections.filter((id) => NOTCH_SECTIONS.some(([x]) => x === id)), ...NOTCH_SECTIONS.map(([id]) => id).filter((id) => !n.sections.includes(id))];
+  const allSections = [...NOTCH_SECTIONS, ...pSections];
+  const sections = [...n.sections.filter((id) => allSections.some(([x]) => x === id)), ...allSections.map(([id]) => id).filter((id) => !n.sections.includes(id))];
   const moveSection = (id, by) => {
     const list = [...n.sections], i = list.indexOf(id), j = i + by;
     if (j < 0 || j >= list.length) return;
@@ -1677,9 +1683,9 @@ function Settings({ tab, setTab }) {
       </section>
       <section className="card group notch-order">
         {sections.map((id) => {
-          const name = NOTCH_SECTIONS.find(([x]) => x === id)[1], on = n.sections.includes(id), i = n.sections.indexOf(id);
+          const sec = allSections.find(([x]) => x === id), name = sec[1], on = n.sections.includes(id), i = n.sections.indexOf(id);
           return (
-            <Row key={id} label={name}>
+            <Row key={id} label={name} hint={sec[2] ? `From the ${sec[2].name} plugin` : undefined}>
               <div className="size-picker">
                 {on && <>
                   <button className="chip" disabled={i === 0} onClick={() => moveSection(id, -1)} aria-label="Move up">↑</button>
@@ -1740,6 +1746,11 @@ function Settings({ tab, setTab }) {
         <Row label="Lower while a video plays" hint="YouTube, Twitch and other sound from a browser or video player for more than 2 seconds">{nSwitch("duck_videos")}</Row>
         <Row label="Lower in Valorant matches" hint="From the start of a match until you're back in the menu">{nSwitch("duck_valorant")}</Row>
         <Row label="Lower in other games" hint="While any fullscreen game is in front">{nSwitch("duck_games")}</Row>
+        {pDucks.map((p) => (
+          <Row key={p.id} label={`Lower for ${p.name}`} hint="The plugin says when, for example during a match">
+            <Switch on={p.duck} onChange={() => send(`/plugins/${p.id}`, "PUT", { duck: !p.duck }).then(loadPlugins).catch(() => {})} />
+          </Row>
+        ))}
         <Row label="Lower to" hint="Of Spotify's own volume. It fades back afterwards; move the volume yourself and it stays where you put it">
           <Segmented options={[[0.1, "10%"], [0.25, "25%"], [0.5, "50%"]]} value={n.duck_level} onChange={(v) => setN({ duck_level: v })} />
         </Row>
@@ -1818,6 +1829,26 @@ function Settings({ tab, setTab }) {
           );
         })}
       </section>
+      {pWidgets.length > 0 && <>
+        <h4>From plugins</h4>
+        <section className="card group">
+          {pWidgets.map(([id, name, p, w]) => {
+            const on = s.widgets.includes(id);
+            return (
+              <div className="widget-row" key={id}>
+                <Row label={name} hint={`${p.name} plugin`}><Switch on={on} onChange={() => flip("widgets", id)} /></Row>
+                {on && (
+                  <div className="widget-opts">
+                    <Segmented options={SIZES.filter(([k]) => (w.sizes || "sml").includes(k))} value={s.sizes?.[id] || "m"}
+                      onChange={(v) => set({ sizes: { ...s.sizes, [id]: v } })} />
+                    <button className={"chip" + (s.overlay.includes(id) ? " on" : "")} onClick={() => flip("overlay", id)}>Over games</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      </>}
       {s.widgets.includes("stack") && <>
         <h4>Widget stack</h4>
         <section className="card group">
@@ -2011,6 +2042,13 @@ export default function Stats() {
     const offs = [listen("open-settings", () => setTab("settings")), listen("open-detail", (e) => (setDetail(e.payload), window.scrollTo(0, 0)))];
     return () => ((stop = true), offs.forEach((o) => o.then((f) => f())));
   }, []);
+  const plug = usePlugins();
+  const plugKey = JSON.stringify([pluginWidgets(plug).map(([id]) => id), pluginOverlays(plug)]);
+  useEffect(() => {
+    if (!plug) return;
+    get("/settings").then(applyWidgets).catch(() => {});
+    invoke("set_overlays", { list: pluginOverlays(plug) }).catch(() => {});
+  }, [plugKey]);
   const View = tab.startsWith("p.") ? PluginTab : { overview: Overview, wrapped: Wrapped, gaming: Gaming, valorant: ValorantTab, lyrics: LyricsView, settings: Settings }[tab];
   const open = (d) => (setDetail(d), window.scrollTo(0, 0));
   return (

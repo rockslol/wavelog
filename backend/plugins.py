@@ -129,10 +129,11 @@ class Ctx:
             self._db.row_factory = sqlite3.Row
         return self._db
 
-    def alert(self, text, sub=None, icon=None):
-        """A notch alert, e.g. ctx.alert("Win 13-9 · Ascent", "+21 RR", icon_url)."""
+    def alert(self, text, sub=None, icon=None, color=None, short=None):
+        """A notch alert, e.g. ctx.alert("Win 13-9 · Ascent", "+21 RR", icon_url, color="#30d158"). It shows for 20
+        seconds. `short` is what the small pill shows (defaults to the start of `sub`)."""
         alerts.append({"id": next(alert_ids), "plugin": self.id, "at": time.time(), "text": str(text), "sub": sub and str(sub),
-                       "icon": image(self._pl, icon)})
+                       "icon": image(self._pl, icon), "color": color, "short": short and str(short)})
 
     def now(self):
         """What Spotify plays right now, or None."""
@@ -404,6 +405,8 @@ def info(pl):
         "widgets": [{"id": k, "title": t, "sizes": s} for k, (_, t, s) in p.widgets.items()] if p else [],
         "sections": [{"id": k, "title": t} for k, (_, t) in p.sections.items()] if p else [],
         "jobs": [fn.__name__ for fn, _, _ in p.jobs] if p else [],
+        "overlays": [{"id": fn.__name__, "game": g, "key": k, "w": w, "h": h} for fn, g, k, w, h in p.overlays] if p else [],
+        "ducks": bool(p and p.ducks), "duck": state.get(pl.id, {}).get("duck", True),
     }
 
 
@@ -557,6 +560,8 @@ async def change(pid: str, body: dict = Body(...)):
         st.setdefault("values", {}).update(new)
     if "enabled" in body:
         st["enabled"] = bool(body["enabled"])
+    if "duck" in body:
+        st["duck"] = bool(body["duck"])
     save_state()
     if "enabled" in body:
         if st["enabled"]:
@@ -609,6 +614,29 @@ async def notch(pid: str, name: str):
     if name not in pl.plugin.sections:
         raise HTTPException(404, "No such section")
     return await blocks(pl, pl.plugin.sections[name][0])
+
+
+@router.get("/p/{pid}/overlay/{name}")
+async def overlay(pid: str, name: str):
+    pl = running(pid)
+    fn = next((o[0] for o in pl.plugin.overlays if o[0].__name__ == name), None)
+    if not fn:
+        raise HTTPException(404, "No such overlay")
+    return await blocks(pl, fn)
+
+
+async def ducking():
+    """True while a plugin wants Spotify quieter (and the user left that on in Settings > Sound)."""
+    for pl in list(loaded.values()):
+        if not (pl.plugin and pl.enabled and pl.plugin.ducks and state.get(pl.id, {}).get("duck", True)):
+            continue
+        for fn in pl.plugin.ducks:
+            try:
+                if await asyncio.wait_for(call(pl, fn), 2):
+                    return True
+            except Exception as e:
+                pl.last_error = f"Ducking: {type(e).__name__}: {e}"[:400]
+    return False
 
 
 @router.post("/p/{pid}/action/{name}")

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
+import { pimg, PluginSection, pluginSections, usePlugins } from "./Plugins";
 import { condition, score, signed, WeatherIcon } from "./widgets";
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -188,6 +189,10 @@ export default function Notch() {
   const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
   const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
   const [storeAlert, setStoreAlert] = useState(null);
+  const plug = usePlugins();
+  const pSecs = pluginSections(plug); // [id, title, plugin, section]
+  const [pAlerts, setPAlerts] = useState([]); // alerts from plugins, each shown for 20 s
+  const lastAlert = useRef(0);
   const [netAlert, setNetAlert] = useState(null); // "Back online" for a few seconds
   const [saleAlert, setSaleAlert] = useState(null);
   const wish = usePoll(o.steam_sales ? "/steam/wishlist" : null, 1800000);
@@ -221,6 +226,13 @@ export default function Notch() {
   if (saleAlert && saleAlert.until > ms) {
     pcActs.push({ id: "sale", icon: <Icon d="controller" />, tone: "#66c0f4", label: `${saleAlert.name} is ${saleAlert.discount}% off`,
       value: saleAlert.price || `-${saleAlert.discount}%`, short: `-${saleAlert.discount}%` });
+  }
+  for (const a of pAlerts) {
+    if (a.until <= ms) continue;
+    const p = plug?.plugins.find((x) => x.id === a.plugin);
+    const pic = a.icon || p?.icon;
+    pcActs.push({ id: "p" + a.id, icon: pic ? <img src={pimg(pic)} draggable={false} /> : <Icon d="bell" />, tone: a.color || "#bf5af2",
+      label: a.text, value: a.sub || p?.name || "", short: a.short || (a.sub || "").slice(0, 10) || "New" });
   }
   if (batAlert && batAlert.until > ms) {
     pcActs.push({ id: "bat", icon: <Icon d="battery" />, tone: "#ff453a", label: `${batAlert.name} battery low`, value: batAlert.text, short: `${batAlert.level}%` });
@@ -262,7 +274,7 @@ export default function Notch() {
       listen("edit", () => {
         editing.current = true;
         rects.current = {};
-        setEdit(opts.current.sections.filter((id) => NOTCH_SECTIONS.some(([x]) => x === id)));
+        setEdit(opts.current.sections.filter((id) => id.startsWith("p_") || NOTCH_SECTIONS.some(([x]) => x === id)));
         setOpen(true);
       }),
       listen("reveal", (e) => setReveal(e.payload)),
@@ -436,6 +448,20 @@ export default function Notch() {
     setStoreAlert({ ...hit, until: Date.now() + 20000 });
   }, [vstore]);
   useEffect(() => {
+    if (!o.alerts) return;
+    const load = () => !hidden && get("/plugins/alerts?after=" + lastAlert.current).then((list) => {
+      if (!list.length) return;
+      const first = !lastAlert.current; // after a restart, only show the ones from the last 20 s
+      lastAlert.current = Math.max(...list.map((a) => a.id));
+      const t = Date.now();
+      const fresh = list.filter((a) => !first || t / 1000 - a.at < 20).map((a) => ({ ...a, until: Math.min(t, a.at * 1000) + 20000 }));
+      if (fresh.length) setPAlerts((old) => [...old.filter((x) => x.until > t), ...fresh]);
+    }).catch(() => {});
+    load();
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
+  }, [o.alerts]);
+  useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(null), toast.until - Date.now());
     return () => clearTimeout(id);
@@ -589,9 +615,15 @@ export default function Notch() {
     shelf: shelf.length ? `${shelf.length} on the shelf` : "Drag files onto the notch",
     todos: openTodos.length ? `${openTodos.length} left` : "Your to-do list",
     valorant: "Right after a match",
+    ...Object.fromEntries(pSecs.map(([id, , p]) => [id, `From the ${p.name} plugin`])),
     steam: steamD?.connected && !steamD.error && !steamD.private ? `${steamD.friends.length} friends online` : "Friends online and in game",
   };
-  const name = (id) => NOTCH_SECTIONS.find(([x]) => x === id)?.[1] || id;
+  const allSecs = [...NOTCH_SECTIONS, ...pSecs];
+  const name = (id) => allSecs.find(([x]) => x === id)?.[1] || "Plugin";
+  const secIcon = (id) => {
+    const p = pSecs.find(([x]) => x === id)?.[2];
+    return p ? (p.icon ? <img src={pimg(p.icon)} draggable={false} /> : <Icon d="bell" />) : <Icon d={SECTION_ICON[id]} />;
+  };
   const endEdit = (save) => {
     if (save) {
       fetch(API + "/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notch: { ...o, sections: edit } }) })
@@ -647,18 +679,18 @@ export default function Notch() {
           <div key={id} data-sec={id} className={"n-ed" + (TILES.has(id) ? " tile" : "") + (dragging === id ? " drag" : "")} onPointerDown={grab(id)}>
             <div className="n-edin">
               <button className="n-x" title={"Remove " + name(id)} onClick={() => setEdit((l) => l.filter((x) => x !== id))}>−</button>
-              <span className="n-eic"><Icon d={SECTION_ICON[id]} /></span>
+              <span className="n-eic">{secIcon(id)}</span>
               <div className="n-etx"><b>{name(id)}</b><small>{sum[id]}</small></div>
             </div>
           </div>
         ))}
         {!edit.length && <p className="n-eempty">Nothing on the dashboard. Add something below.</p>}
       </div>
-      {edit.length < NOTCH_SECTIONS.length && (
+      {allSecs.some(([id]) => !edit.includes(id)) && (
         <div className="n-tray">
           <small>Add to the notch</small>
           <div className="n-chips">
-            {NOTCH_SECTIONS.filter(([id]) => !edit.includes(id)).map(([id, label]) => (
+            {allSecs.filter(([id]) => !edit.includes(id)).map(([id, label]) => (
               <button key={id} className="n-add" onClick={() => setEdit((l) => [...l, id])}><Icon d="plus" />{label}</button>
             ))}
           </div>
@@ -908,6 +940,7 @@ export default function Notch() {
       </div>
     ),
   };
+  for (const [id, , p, sec] of pSecs) parts[id] = <PluginSection key={id} pid={p.id} id={sec.id} open={open} />;
   // Sections render in the chosen order; neighbouring boxes share a two-column grid.
   const blocks = [];
   for (const id of o.sections) {

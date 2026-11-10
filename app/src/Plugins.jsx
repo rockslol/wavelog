@@ -2,9 +2,12 @@
 // Plugins never run code in this window: they send blocks (see backend/wavelog.py) and this draws them.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { API, get } from "./api";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { API, get, usePoll, useSize } from "./api";
 import Columns from "./Columns";
+import Frame from "./Frame";
 import { Row, Segmented, Switch } from "./Stats";
 
 export const pimg = (src) => (src && src.startsWith("/") ? API + src : src);
@@ -21,6 +24,20 @@ export const send = (path, method = "POST", body) =>
 let list = null;
 const subs = new Set();
 export const loadPlugins = () => get("/plugins").then((j) => ((list = j), subs.forEach((f) => f(j)), j));
+export const pluginList = () => list;
+export const running = (d) => (d?.plugins || []).filter((p) => p.enabled && !p.error);
+
+// Window labels: p_<plugin>_<widget> and po_<plugin>_<overlay>; notch sections use the same p_<plugin>_<section>.
+// Plugin ids have no underscores, so the first one after the prefix splits them.
+export const slot = (pid, id) => `p_${pid}_${id}`;
+export const unslot = (label, prefix = "p_") => {
+  const rest = label.slice(prefix.length), i = rest.indexOf("_");
+  return [rest.slice(0, i), rest.slice(i + 1)];
+};
+// What the plugins add to each place: [slot id, title, plugin, item].
+export const pluginWidgets = (d) => running(d).flatMap((p) => p.widgets.map((w) => [slot(p.id, w.id), w.title, p, w]));
+export const pluginSections = (d) => running(d).flatMap((p) => p.sections.map((s) => [slot(p.id, s.id), s.title, p, s]));
+export const pluginOverlays = (d) => running(d).flatMap((p) => p.overlays.map((o) => [`po_${p.id}_${o.id}`, o.game, o.key, o.w, o.h]));
 export function usePlugins() {
   const [d, setD] = useState(list);
   useEffect(() => {
@@ -197,6 +214,49 @@ export function Blocks({ pid, blocks, reload, compact }) {
       {(Array.isArray(blocks) ? blocks : []).map((b, i) => <Block key={i} b={b} run={run} compact={compact} />)}
     </>
   );
+}
+
+// A plugin widget on the desktop (window p_<plugin>_<widget>).
+export function PluginWidget() {
+  const [pid, name] = unslot(getCurrentWindow().label);
+  const size = useSize();
+  const [n, setN] = useState(0);
+  const blocks = usePoll(`/p/${pid}/widget/${name}?size=${size}&r=${n}`, 30000);
+  return (
+    <Frame className="pwidget">
+      {blocks === undefined ? null : blocks === null ? (
+        <div className="pw-off"><b>Plugin widget</b><span>Its plugin is off or removed. Turn it on in Settings → Plugins</span></div>
+      ) : <Blocks pid={pid} blocks={blocks} reload={() => setN((x) => x + 1)} compact />}
+    </Frame>
+  );
+}
+
+// A plugin panel over a game while its key is held (window po_<plugin>_<overlay>). Read each time it opens.
+export function PluginOverlay() {
+  const [pid, name] = unslot(getCurrentWindow().label, "po_");
+  const [blocks, setBlocks] = useState(null);
+  useEffect(() => {
+    document.documentElement.classList.add("overlay");
+    const off = listen("visibility", (e) => e.payload && get(`/p/${pid}/overlay/${name}`).then(setBlocks).catch(() => {}));
+    get(`/p/${pid}/overlay/${name}`).then(setBlocks).catch(() => {});
+    return () => void off.then((f) => f());
+  }, []);
+  return blocks && <div className="tp po"><Blocks pid={pid} blocks={blocks} compact /></div>;
+}
+
+// A plugin section in the notch's dashboard. Read when the notch opens, and every 15 s while it's open.
+export function PluginSection({ pid, id, open }) {
+  const [blocks, setBlocks] = useState(null);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const load = () => get(`/p/${pid}/notch/${id}`).then((b) => live && setBlocks(b)).catch(() => live && setBlocks(null));
+    load();
+    const t = setInterval(load, 15000);
+    return () => ((live = false), clearInterval(t));
+  }, [open, n]);
+  return blocks?.length > 0 && <div className="n-plugin" onClick={(e) => e.stopPropagation()}><Blocks pid={pid} blocks={blocks} reload={() => setN((x) => x + 1)} compact /></div>;
 }
 
 // --- Settings > Plugins ------------------------------------------------------------------------------------------
