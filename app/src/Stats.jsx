@@ -1297,7 +1297,7 @@ function Detail({ kind, id, tab, setTab, back }) {
 }
 
 const WIDGETS = [["widget", "Now playing"], ["lyrics", "Lyrics"], ["calendar", "Calendar"], ["photos", "Photos"], ["weather", "Weather"], ["system", "PC monitor"],
-  ["clock", "Clock"], ["countdown", "Countdown"], ["todo", "To do"], ["timer", "Focus timer"], ["note", "Note"], ["valorant", "Valorant"]];
+  ["clock", "Clock"], ["countdown", "Countdown"], ["todo", "To do"], ["timer", "Focus timer"], ["note", "Note"], ["valorant", "Valorant"], ["viz", "Visualizer"]];
 const ALL = [...WIDGETS, ["stack", "Widget stack"], ["notch", "Notch"]];
 
 const SIZES = [["s", "Small"], ["m", "Medium"], ["l", "Large"]];
@@ -1754,7 +1754,7 @@ function Settings({ tab, setTab }) {
         <section className="card group">
           <Row label="Widgets in the stack" hint="Scroll on the stack to flip">
             <div className="chips">
-              {WIDGETS.map(([id, name]) => <button key={id} className={"chip" + (s.stack.includes(id) ? " on" : "")} onClick={() => flip("stack", id)}>{name}</button>)}
+              {WIDGETS.filter(([id]) => id !== "viz").map(([id, name]) => <button key={id} className={"chip" + (s.stack.includes(id) ? " on" : "")} onClick={() => flip("stack", id)}>{name}</button>)}
             </div>
           </Row>
         </section>

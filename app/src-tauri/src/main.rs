@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWi
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use tauri_plugin_global_shortcut::ShortcutState;
 
-const WIDGETS: [&str; 13] = ["widget", "lyrics", "calendar", "photos", "weather", "system", "clock", "countdown", "todo", "timer", "note", "valorant", "stack"];
+const WIDGETS: [&str; 14] = ["widget", "lyrics", "calendar", "photos", "weather", "system", "clock", "countdown", "todo", "timer", "note", "valorant", "stack", "viz"];
 
 fn dims(size: &str) -> (f64, f64) {
     match size {
@@ -799,6 +799,151 @@ fn audio_parts() -> (Option<Vol>, Option<Meter>) {
     }
 }
 
+// ---- audio visualizer: what the speakers play (loopback), split into 32 bands for the Visualizer widget ----
+
+type Loopback = (windows::Win32::Media::Audio::IAudioClient, windows::Win32::Media::Audio::IAudioCaptureClient, usize, u32, String);
+
+fn default_output_id() -> Option<String> {
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    unsafe {
+        let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        Some(take_pwstr(e.GetDefaultAudioEndpoint(eRender, eConsole).ok()?.GetId().ok()?))
+    }
+}
+
+fn open_loopback() -> Option<Loopback> {
+    use windows::Win32::{Media::Audio::*, System::Com::*};
+    unsafe {
+        let e: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        let dev = e.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+        let id = take_pwstr(dev.GetId().ok()?);
+        let client: IAudioClient = dev.Activate(CLSCTX_ALL, None).ok()?;
+        let fmt = client.GetMixFormat().ok()?;
+        let (bits, ch, rate) = ((*fmt).wBitsPerSample, (*fmt).nChannels as usize, (*fmt).nSamplesPerSec);
+        // The shared-mode mix format is 32-bit float on every normal Windows setup; anything else is skipped.
+        let ok = bits == 32 && client.Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 1_000_000, 0, fmt, None).is_ok();
+        CoTaskMemFree(Some(fmt as _));
+        if !ok {
+            return None;
+        }
+        let cap: IAudioCaptureClient = client.GetService().ok()?;
+        client.Start().ok()?;
+        Some((client, cap, ch.max(1), rate, id))
+    }
+}
+
+/// Magnitudes of a Hann-windowed real signal (length a power of two), radix-2 FFT.
+fn spectrum(input: &[f32]) -> Vec<f32> {
+    let n = input.len();
+    let tau = std::f32::consts::TAU;
+    let mut re: Vec<f32> = input.iter().enumerate().map(|(i, x)| x * (0.5 - 0.5 * (tau * i as f32 / (n - 1) as f32).cos())).collect();
+    let mut im = vec![0.0f32; n];
+    let mut j = 0;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j |= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
+        }
+    }
+    let mut len = 2;
+    while len <= n {
+        let (wr, wi) = ((-tau / len as f32).cos(), (-tau / len as f32).sin());
+        for start in (0..n).step_by(len) {
+            let (mut cr, mut ci) = (1.0f32, 0.0f32);
+            for k in 0..len / 2 {
+                let (a, b) = (start + k, start + k + len / 2);
+                let (br, bi) = (re[b] * cr - im[b] * ci, re[b] * ci + im[b] * cr);
+                (re[b], im[b]) = (re[a] - br, im[a] - bi);
+                (re[a], im[a]) = (re[a] + br, im[a] + bi);
+                (cr, ci) = (cr * wr - ci * wi, cr * wi + ci * wr);
+            }
+        }
+        len <<= 1;
+    }
+    (0..n / 2).map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt() * 4.0 / n as f32).collect()
+}
+
+fn viz_audio(app: &AppHandle) {
+    use windows::Win32::Media::Audio::AUDCLNT_BUFFERFLAGS_SILENT;
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    const N: usize = 1024;
+    const BANDS: usize = 32;
+    let mut cap: Option<Loopback> = None;
+    let (mut ring, mut at) = (vec![0.0f32; N], 0usize);
+    let mut bands = [0.0f32; BANDS];
+    let (mut emitted, mut checked, mut quiet) = (std::time::Instant::now(), std::time::Instant::now(), 0u32);
+    loop {
+        // Only while the widget is on screen: nothing runs while it's hidden or a game is fullscreen.
+        let want = shown("viz") && app.get_webview_window("viz").is_some_and(|w| w.is_visible().unwrap_or(false));
+        if !want {
+            if let Some((c, ..)) = cap.take() {
+                unsafe { let _ = c.Stop(); }
+            }
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        if cap.is_none() || checked.elapsed() >= Duration::from_secs(2) {
+            checked = std::time::Instant::now();
+            if cap.as_ref().map(|c| &c.4) != default_output_id().as_ref() {
+                cap = open_loopback(); // first start, or the output device changed (headphones / speakers)
+            }
+        }
+        let Some((_, capture, ch, rate, _)) = &cap else {
+            thread::sleep(Duration::from_secs(1));
+            continue;
+        };
+        let (ch, rate) = (*ch, *rate);
+        let mut failed = false;
+        unsafe {
+            while capture.GetNextPacketSize().is_ok_and(|n| n > 0) {
+                let (mut data, mut frames, mut flags) = (std::ptr::null_mut(), 0u32, 0u32);
+                if capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None).is_err() {
+                    failed = true;
+                    break;
+                }
+                let silent = flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0;
+                let samples = if silent { &[][..] } else { std::slice::from_raw_parts(data as *const f32, frames as usize * ch) };
+                for f in 0..frames as usize {
+                    ring[at] = if silent { 0.0 } else { samples[f * ch..f * ch + ch].iter().sum::<f32>() / ch as f32 };
+                    at = (at + 1) % N;
+                }
+                let _ = capture.ReleaseBuffer(frames);
+            }
+        }
+        if failed {
+            cap = None;
+            continue;
+        }
+        if emitted.elapsed() >= Duration::from_millis(33) {
+            emitted = std::time::Instant::now();
+            let ordered: Vec<f32> = ring[at..].iter().chain(&ring[..at]).copied().collect();
+            let mag = spectrum(&ordered);
+            let bin = |hz: f32| ((hz * N as f32 / rate as f32) as usize).clamp(1, N / 2 - 1);
+            for (b, band) in bands.iter_mut().enumerate() {
+                let lo = 40.0 * (16000.0f32 / 40.0).powf(b as f32 / BANDS as f32);
+                let hi = 40.0 * (16000.0f32 / 40.0).powf((b + 1) as f32 / BANDS as f32);
+                let (l, h) = (bin(lo), bin(hi).max(bin(lo) + 1));
+                let peak = mag[l..h].iter().fold(0.0f32, |m, &v| m.max(v));
+                let v = ((20.0 * (peak + 1e-9).log10() + 66.0) / 60.0).clamp(0.0, 1.0);
+                *band = if v > *band { v } else { *band * 0.82 + v * 0.18 }; // fast up, slower down
+            }
+            quiet = if bands.iter().all(|&v| v < 0.02) { quiet + 1 } else { 0 };
+            if quiet < 30 {
+                let _ = app.emit_to("viz", "viz", bands.iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<f32>>());
+            }
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn notch_audio(app: &AppHandle) {
     unsafe {
         let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
@@ -1249,6 +1394,8 @@ fn main() {
             thread::spawn(move || notch_hover(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || notch_audio(&handle));
+            let handle = app.handle().clone();
+            thread::spawn(move || viz_audio(&handle));
             thread::spawn(camera_watch);
             thread::spawn(ducker);
             let handle = app.handle().clone();

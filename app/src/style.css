@@ -5689,3 +5689,47 @@ button.n-dl:hover {
 .sgame.wish.sale .sub {
   color: #beee11;
 }
+
+/* Visualizer widget */
+.visualizer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.viz-bars {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 0;
+}
+.viz-bars i {
+  flex: 1;
+  height: 100%;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(to top, var(--bar), color-mix(in srgb, var(--bar) 55%, white));
+  transform: scaleY(0.03);
+  transform-origin: bottom;
+  transition: transform 0.06s linear;
+}
+.size-s .viz-bars {
+  gap: 4px;
+}
+.viz-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.viz-meta b, .viz-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viz-meta b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.viz-meta span {
+  font-size: 12px;
+  opacity: 0.7;
+}

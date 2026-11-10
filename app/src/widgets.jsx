@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { API, hidden, useLyrics, usePoll, useSize } from "./api";
 import Frame from "./Frame";
 
@@ -232,6 +232,41 @@ function Face({ d }) {
       {hand(sec * 6, 40, 1.2, "second")}
       <circle cx="50" cy="50" r="2.6" />
     </svg>
+  );
+}
+
+// Bars that move to whatever the speakers play. Rust sends 32 bands about 30 times a second; the bars are moved
+// directly (no React render per frame), and Rust stops sending while the widget is hidden or nothing plays.
+const lit = (c, a = 1) => c && `rgba(${c.map((v) => Math.round(255 * (0.35 + (0.65 * v) / Math.max(...c, 0.01)))).join(",")},${a})`;
+
+export function Visualizer() {
+  const size = useSize();
+  const now = usePoll("/now", 3000);
+  const box = useRef(null);
+  const n = size === "s" ? 16 : 32;
+  useEffect(() => {
+    const off = listen("viz", (e) => {
+      const els = box.current?.children, v = e.payload;
+      if (!els) return;
+      for (let i = 0; i < els.length; i++) {
+        const k = (i * v.length) / els.length, a = v[Math.floor(k)], b = v[Math.min(v.length - 1, Math.floor(k) + (n < v.length ? 1 : 0))];
+        els[i].style.transform = `scaleY(${Math.max(0.03, n < v.length ? (a + b) / 2 : a).toFixed(3)})`;
+      }
+    });
+    return () => off.then((f) => f());
+  }, [n]);
+  const color = lit(now?.color) || "rgba(255,255,255,0.9)";
+  return (
+    <Frame className="visualizer" hue={now?.color}>
+      <div className="viz-bars" ref={box} style={{ "--bar": color }}>
+        {Array.from({ length: n }, (_, i) => <i key={i} />)}
+      </div>
+      {size !== "s" && (
+        <div className="viz-meta">
+          {now?.playing ? <><b>{now.name}</b><span>{now.artists}</span></> : <span>Plays along with any sound on this PC</span>}
+        </div>
+      )}
+    </Frame>
   );
 }
 
