@@ -658,14 +658,41 @@ function Gaming({ tab, setTab }) {
 
 const shortDate = (t) => new Date(t * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+function Wishlist() {
+  const w = usePoll("/steam/wishlist", 1800000);
+  if (!w || (!w.items.length && !w.private)) return null;
+  return (
+    <section className="card">
+      <div className="head"><h3>Your Steam wishlist</h3>{w.items.length > 0 && <span className="hint">{w.sale ? `${w.sale} on sale` : "Nothing on sale right now"}</span>}</div>
+      {w.private ? <p className="none">Your wishlist is private. Make your game details public in Steam's privacy settings to see sales here.</p> : (
+        <div className="steam-games">
+          {w.items.map((g) => (
+            <button key={g.appid} className={"sgame wish" + (g.discount ? " sale" : "")} title="Open in the Steam store" onClick={() => invoke("open_url", { url: g.url })}>
+              <span className="wish-img">
+                {g.header ? <img src={g.header} draggable={false} loading="lazy" /> : <span />}
+                {g.discount > 0 && <b className="wish-off">-{g.discount}%</b>}
+              </span>
+              <div className="name">{g.name}</div>
+              <div className="sub">{g.discount > 0 && g.was ? <><s>{g.was}</s> {g.price}</> : g.price || "No price yet"}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SteamCard() {
   const st = usePoll("/steam", 60000);
   if (!st) return null;
   if (!st.connected || st.error) return (
-    <section className="card">
-      <div className="head"><h3>Steam</h3></div>
-      <p className="none">{st.error || "Add a Steam API key in Settings → General to see your recent games, newest achievements and friends online here."}</p>
-    </section>
+    <>
+      <section className="card">
+        <div className="head"><h3>Steam</h3></div>
+        <p className="none">{st.error || "Add a Steam API key in Settings → Accounts to see your recent games, newest achievements and friends online here."}</p>
+      </section>
+      <Wishlist />
+    </>
   );
   return (
     <>
@@ -711,6 +738,7 @@ function SteamCard() {
           ) : <p className="none">None in your recent games, or your game details are private in Steam.</p>}
         </section>
       </div>
+      <Wishlist />
     </>
   );
 }
@@ -1310,7 +1338,7 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
 };
@@ -1665,6 +1693,7 @@ function Settings({ tab, setTab }) {
             : `Signed in as ${steamD.me?.name || "you"}${steamD.private ? " · friends list is private" : ""}`} />
         <label className="field"><span>Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)</span><input {...field("steam_key")} placeholder="32 letters and numbers" /></label>
         <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
+        <Row label="Wishlist sale alerts" hint="The notch tells you when a game on your wishlist goes on sale or gets cheaper. Works without an API key">{nSwitch("steam_sales")}</Row>
       </section>
       <p className="hint foot-note">Steam shows your recent games, newest achievements and friends online on the Gaming page and in the notch. Friends and achievements only show if they're public in Steam's privacy settings. Valorant needs no account: it reads the Riot Client on this PC.</p>
     </>,

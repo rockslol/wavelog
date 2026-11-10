@@ -94,15 +94,21 @@ def community_img(appid, name):
     return f"https://shared.akamai.steamstatic.com/community_assets/images/apps/{appid}/{name if '.' in name else name + '.jpg'}"
 
 
-async def header(appid):
-    """Store header image. Newer games keep it under a hashed path, so ask the store for it."""
+async def basics(appid):
+    """Name and store header image. Newer games keep the header under a hashed path, so ask the store for it."""
     async def look():
         r = await http.get("https://store.steampowered.com/api/appdetails", params={"appids": appid, "filters": "basic"}, timeout=20)
-        return ((r.json().get(str(appid)) or {}).get("data") or {}).get("header_image")
+        d = (r.json().get(str(appid)) or {}).get("data")
+        d = d if isinstance(d, dict) else {}
+        return {"name": d.get("name"), "header": d.get("header_image")}
     try:
-        return await kept(f"header{appid}", 7 * 86400, look)
+        return await kept(f"basics{appid}", 7 * 86400, look)
     except Exception:
-        return None
+        return {"name": None, "header": None}
+
+
+async def header(appid):
+    return (await basics(appid))["header"]
 
 
 async def recent(key, sid):
@@ -150,6 +156,46 @@ async def steam():
     players = me["response"]["players"]
     return {"connected": True, "me": person(players[0]) if players else None, "recent": games, "friends": fr, "achievements": ach,
             "private": fr is None}
+
+
+async def wishlist_items(sid):
+    """The public wishlist with today's prices. Needs no API key, only a public wishlist."""
+    r = (await http.get(API + "IWishlistService/GetWishlist/v1/", params={"steamid": sid}, timeout=20)).json().get("response", {})
+    if "items" not in r:
+        return None  # private or empty
+    ids = [i["appid"] for i in r["items"]]
+    prices = {}
+    for k in range(0, len(ids), 50):  # price_overview is the one filter the store answers for many games at once
+        res = await http.get("https://store.steampowered.com/api/appdetails",
+                             params={"appids": ",".join(map(str, ids[k:k + 50])), "filters": "price_overview"}, timeout=20)
+        for a, v in res.json().items():
+            d = v.get("data") if v.get("success") else None
+            prices[int(a)] = d.get("price_overview") if isinstance(d, dict) else None
+    gate = asyncio.Semaphore(4)
+
+    async def one(appid):
+        async with gate:
+            b = await basics(appid)
+        p = prices.get(appid) or {}
+        return {"appid": appid, "name": b["name"] or f"App {appid}", "header": b["header"], "discount": p.get("discount_percent", 0),
+                "price": p.get("final_formatted") or None, "was": p.get("initial_formatted") or None,
+                "url": f"https://store.steampowered.com/app/{appid}"}
+    items = await asyncio.gather(*(one(a) for a in ids))
+    return sorted(items, key=lambda x: (-x["discount"], x["name"].lower()))
+
+
+@router.get("/steam/wishlist")
+async def wishlist():
+    sid = settings.get("steam_id") or detect_id()
+    if not sid:
+        return {"items": [], "error": "Steam isn't set up on this PC"}
+    try:
+        items = await kept("wishlist", 3 * 3600, lambda: wishlist_items(sid))
+    except Exception:
+        return {"items": [], "error": "Couldn't reach Steam, will retry"}
+    if items is None:
+        return {"items": [], "private": True}
+    return {"items": items, "sale": sum(1 for i in items if i["discount"] > 0)}
 
 
 @router.get("/steam/detect")

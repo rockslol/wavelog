@@ -5646,3 +5646,46 @@ button.n-dl:hover {
 .n-netline span {
   margin-left: auto;
 }
+
+/* Steam wishlist */
+.sgame.wish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sgame.wish:hover img {
+  filter: brightness(1.12);
+}
+.wish-img {
+  position: relative;
+  display: block;
+}
+.wish-img > span {
+  display: block;
+  aspect-ratio: 460 / 215;
+  margin-bottom: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.wish-off {
+  position: absolute;
+  right: 8px;
+  bottom: 12px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #4c6b22;
+  color: #beee11;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sgame.wish .sub s {
+  margin-right: 4px;
+  opacity: 0.55;
+}
+.sgame.wish.sale .sub {
+  color: #beee11;
+}

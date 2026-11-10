@@ -162,6 +162,8 @@ export default function Notch() {
   const vstore = usePoll(set?.valorant ? "/valorant/store" : null, 600000);
   const [storeAlert, setStoreAlert] = useState(null);
   const [netAlert, setNetAlert] = useState(null); // "Back online" for a few seconds
+  const [saleAlert, setSaleAlert] = useState(null);
+  const wish = usePoll(o.steam_sales ? "/steam/wishlist" : null, 1800000);
   const netHigh = useRef(0), wasOnline = useRef(null);
   const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices"), wantNotif = o.notifs || on("notifications");
   const wantNet = o.net_speed || o.offline;
@@ -187,6 +189,10 @@ export default function Notch() {
   if (storeAlert && storeAlert.until > ms) {
     pcActs.push({ id: "vstore", icon: storeAlert.icon ? <img src={storeAlert.icon} draggable={false} /> : <Icon d="controller" />, tone: "#ff4655",
       label: `${storeAlert.name} is in your store`, value: `${storeAlert.price} VP`, short: "Store" });
+  }
+  if (saleAlert && saleAlert.until > ms) {
+    pcActs.push({ id: "sale", icon: <Icon d="controller" />, tone: "#66c0f4", label: `${saleAlert.name} is ${saleAlert.discount}% off`,
+      value: saleAlert.price || `-${saleAlert.discount}%`, short: `-${saleAlert.discount}%` });
   }
   if (batAlert && batAlert.until > ms) {
     pcActs.push({ id: "bat", icon: <Icon d="battery" />, tone: "#ff453a", label: `${batAlert.name} battery low`, value: batAlert.text, short: `${batAlert.level}%` });
@@ -343,6 +349,18 @@ export default function Notch() {
     const id = setInterval(load, 1500);
     return () => clearInterval(id);
   }, [o.privacy]);
+  // A Steam wishlist game that went on sale or got cheaper since we last looked: tell once per price.
+  useEffect(() => {
+    const sales = (wish?.items || []).filter((g) => g.discount > 0);
+    if (!sales.length) return;
+    const seen = new Set(stored("steam-sales-seen") || []);
+    const fresh = sales.filter((g) => !seen.has(`${g.appid}:${g.discount}`));
+    if (!fresh.length) return;
+    try {
+      localStorage.setItem("steam-sales-seen", JSON.stringify(sales.map((g) => `${g.appid}:${g.discount}`)));
+    } catch {}
+    setSaleAlert({ ...fresh[0], until: Date.now() + 20000 });
+  }, [wish]);
   // A wishlisted skin in today's store or the night market: tell once per shop rotation.
   useEffect(() => {
     const hit = [...(vstore?.daily || []), ...(vstore?.night || [])].find((s) => s.wanted);
