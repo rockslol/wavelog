@@ -57,7 +57,7 @@ export const NOTCH_SECTIONS = [["clock", "Clock and weather"], ["music", "Music"
   ["valorant", "Last Valorant match"], ["steam", "Steam friends"]];
 export const NOTCH = {
   idle: "weather", open: "hover", autohide: true, monitor: "", lyrics: true, viz: true, glow: true, accent: "album", peek: true, osd: true, scroll: true, alerts: true,
-  privacy: true, downloads: true, screenshots: true, battery: true, notifs: true, notif_text: true, notif_mute: [], shelf: true, shelf_expire: 24,
+  privacy: true, downloads: true, screenshots: true, battery: true, notifs: true, notif_text: true, notif_mute: [], shelf: true, shelf_expire: 24, music_lyrics: true, music_next: true,
   duck_calls: true, duck_videos: true, duck_valorant: true, duck_games: false, duck_level: 0.25,
   sections: NOTCH_SECTIONS.map(([id]) => id), v: 6,
 };

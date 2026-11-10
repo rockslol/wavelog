@@ -1270,7 +1270,7 @@ const WORDS = {
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
   "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
-  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level",
+  "Lower in Valorant matches": "duck quieter game", "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
   "Valorant tracker": "riot rank rr matches", "Tab panel": "overlay match scoreboard",
 };
@@ -1521,6 +1521,8 @@ function Settings({ tab, setTab }) {
           <Segmented options={[["hover", "Hover"], ["click", "Click"]]} value={n.open} onChange={(v) => setN({ open: v })} />
         </Row>
         <Row label="Scroll for volume" hint="Scroll on the notch to change Spotify's volume (not the PC's)">{nSwitch("scroll")}</Row>
+        <Row label="Lyrics under the song" hint="The previous, current and next line in the music card">{nSwitch("music_lyrics")}</Row>
+        <Row label="Up next" hint="The next song in your queue, at the bottom of the music card">{nSwitch("music_next")}</Row>
         <Row label="Layout" hint={s.widgets.includes("notch") ? "Opens the notch so you can drag things around, remove them and add more, like a phone home screen"
           : "Turn the notch on first"}>
           <button className="primary" disabled={!s.widgets.includes("notch")} onClick={() => emitTo("notch", "edit", true)}>Edit notch</button>

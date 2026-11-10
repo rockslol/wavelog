@@ -609,12 +609,12 @@ export default function Notch() {
             </div>
           ) : <div />}
         </div>
-        {ly.synced && (
+        {o.music_lyrics && ly.synced && (
           <div className="n-lyrics">
             {lines.map((l, k) => <p key={l ? l[0] + l[1] : "e" + k} className={k === 1 && l ? "on" : ""}>{l ? l[1] || "♪" : ""}</p>)}
           </div>
         )}
-        {up?.next?.[0] && (
+        {o.music_next && up?.next?.[0] && (
           <div className="n-next">
             {up.next[0].image ? <img src={up.next[0].image} draggable={false} /> : <div />}
             <div><small>Up next</small><span>{up.next[0].name}<i> · {up.next[0].artists}</i></span></div>
