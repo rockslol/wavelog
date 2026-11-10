@@ -50,11 +50,17 @@ class BITMAPINFOHEADER(ctypes.Structure):
                 ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long), ("biClrUsed", ctypes.c_uint32), ("biClrImportant", ctypes.c_uint32)]
 
 
+class BITMAP(ctypes.Structure):
+    _fields_ = [("bmType", ctypes.c_long), ("bmWidth", ctypes.c_long), ("bmHeight", ctypes.c_long), ("bmWidthBytes", ctypes.c_long),
+                ("bmPlanes", ctypes.c_uint16), ("bmBitsPixel", ctypes.c_uint16), ("bmBits", ctypes.c_void_p)]
+
+
 IID_ITEM = GUID("43826d1e-e718-42ee-bc55-a1e261c37bfe")  # IShellItem
 IID_IMAGES = GUID("bcc18b79-ba16-442f-80c4-8a59c30c463b")  # IShellItemImageFactory
 shell32.SHCreateItemFromParsingName.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p, ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p)]
 gdi32.GetDIBits.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
 gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+gdi32.GetObjectW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 
 
 def vcall(obj, index, *types):
@@ -62,14 +68,14 @@ def vcall(obj, index, *types):
     return ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *types)(vtbl[index])
 
 
-def shell_item(aumid, iid):
+def shell_item(name, iid):
     p = ctypes.c_void_p()
-    ok = shell32.SHCreateItemFromParsingName("shell:AppsFolder\\" + aumid, None, ctypes.byref(iid), ctypes.byref(p)) == 0
+    ok = shell32.SHCreateItemFromParsingName(name, None, ctypes.byref(iid), ctypes.byref(p)) == 0
     return p if ok and p.value else None
 
 
 def app_name(aumid):
-    p = shell_item(aumid, IID_ITEM)
+    p = shell_item("shell:AppsFolder\\" + aumid, IID_ITEM)
     if not p:
         return None
     try:
@@ -83,29 +89,42 @@ def app_name(aumid):
         vcall(p, 2)(p)  # Release
 
 
-def app_icon(aumid, px=64):
-    p = shell_item(aumid, IID_IMAGES)
+def shell_image(name, px, flags):
+    """A shell item's picture as PNG: GetImage flags 0 = thumbnail (or icon), 0x5 = icon only."""
+    p = shell_item(name, IID_IMAGES)
     if not p:
         return None
     hbm = ctypes.c_void_p()
     try:
-        if vcall(p, 3, SIZE, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(p, SIZE(px, px), 0x5, ctypes.byref(hbm)) != 0:  # GetImage, icon only
+        if vcall(p, 3, SIZE, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(p, SIZE(px, px), flags, ctypes.byref(hbm)) != 0:  # GetImage
             return None
     finally:
         vcall(p, 2)(p)
     try:
-        bi = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), px, -px, 1, 32, 0, 0, 0, 0, 0, 0)
-        buf = ctypes.create_string_buffer(px * px * 4)
+        bm = BITMAP()
+        if not gdi32.GetObjectW(hbm, ctypes.sizeof(bm), ctypes.byref(bm)):
+            return None
+        w, h = bm.bmWidth, abs(bm.bmHeight)
+        bi = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
+        buf = ctypes.create_string_buffer(w * h * 4)
         dc = user32.GetDC(None)
-        lines = gdi32.GetDIBits(dc, hbm, 0, px, buf, ctypes.byref(bi), 0)
+        lines = gdi32.GetDIBits(dc, hbm, 0, h, buf, ctypes.byref(bi), 0)
         user32.ReleaseDC(None, dc)
         if not lines:
             return None
+        im = Image.frombuffer("RGBA", (w, h), buf.raw, "raw", "BGRA", 0, 1)
+        if im.getchannel("A").getextrema() == (0, 0):  # photo thumbnails come without alpha
+            im.putalpha(255)
+        im.thumbnail((px, px))
         out = io.BytesIO()
-        Image.frombuffer("RGBA", (px, px), buf.raw, "raw", "BGRA", 0, 1).save(out, "PNG")
+        im.save(out, "PNG")
         return out.getvalue()
     finally:
         gdi32.DeleteObject(hbm)
+
+
+def app_icon(aumid, px=64):
+    return shell_image("shell:AppsFolder\\" + aumid, px, 0x5)
 
 
 def pretty(aumid):

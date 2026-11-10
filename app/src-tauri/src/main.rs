@@ -32,6 +32,8 @@ static TAB_Y: AtomicU64 = AtomicU64::new(0x3FE6666666666666);
 static RAISED: AtomicBool = AtomicBool::new(false);
 static NOTCH: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 static NOTCH_IN: AtomicBool = AtomicBool::new(false);
+static NOTCH_CATCH: AtomicBool = AtomicBool::new(false);
+static NOTCH_DROPS: AtomicBool = AtomicBool::new(true);
 const NOTCH_SIZE: (f64, f64) = (640.0, 780.0);
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static NOTCH_MONITOR: Mutex<String> = Mutex::new(String::new());
@@ -201,10 +203,35 @@ fn monitors(app: AppHandle) -> Vec<(String, bool, u32, u32)> {
 }
 
 #[tauri::command]
-fn notch(w: f64, h: f64, autohide: Option<bool>) {
+fn notch(w: f64, h: f64, autohide: Option<bool>, drops: Option<bool>) {
     *NOTCH.lock().unwrap() = (w, h);
     if let Some(a) = autohide {
         NOTCH_AUTOHIDE.store(a, Relaxed);
+    }
+    if let Some(d) = drops {
+        NOTCH_DROPS.store(d, Relaxed);
+    }
+}
+
+/// Drags shelf files out of the notch into Explorer, Discord, a browser. Runs on the main thread (sync command), which
+/// has OLE set up; the shell builds the data object and the drag image. Copy or link only, so the shelf never moves a file.
+#[tauri::command]
+fn shelf_drag(window: tauri::WebviewWindow, paths: Vec<String>) -> bool {
+    use windows::Win32::System::{Com::IDataObject, Ole::{IDropSource, DROPEFFECT_COPY, DROPEFFECT_LINK}};
+    use windows::Win32::UI::Shell::{Common::ITEMIDLIST, *};
+    let Ok(h) = window.hwnd() else { return false };
+    unsafe {
+        let ids: Vec<*const ITEMIDLIST> = paths.iter()
+            .map(|p| ILCreateFromPathW(&windows::core::HSTRING::from(p.as_str())) as *const ITEMIDLIST)
+            .filter(|p| !p.is_null()).collect();
+        let drag = || -> windows::core::Result<()> {
+            let data: IDataObject = SHCreateShellItemArrayFromIDLists(&ids)?.BindToHandler(None, &BHID_DataObject)?;
+            SHDoDragDrop(Some(windows::Win32::Foundation::HWND(h.0 as _)), &data, None::<&IDropSource>, DROPEFFECT_COPY | DROPEFFECT_LINK)?;
+            Ok(())
+        };
+        let ok = !ids.is_empty() && drag().is_ok();
+        ids.into_iter().for_each(|p| ILFree(Some(p)));
+        ok
     }
 }
 
@@ -227,10 +254,11 @@ fn notch_hover(app: &AppHandle) {
             let mut c = POINT { x: 0, y: 0 };
             unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut c) };
             let (rw, rh) = *NOTCH.lock().unwrap();
-            let (mut inside, mut show) = (false, true);
+            let (mut inside, mut near, mut show) = (false, false, true);
             if let (Ok(p), Ok(s), Ok(k), Ok(h), true) = (w.outer_position(), w.outer_size(), w.scale_factor(), w.hwnd(), visible() && w.is_visible().unwrap_or(false)) {
                 let (cx, cy, mid) = (c.x as f64, c.y as f64, p.x as f64 + s.width as f64 / 2.0);
                 inside = (cx - mid).abs() < rw * k / 2.0 && c.y >= p.y && cy < p.y as f64 + rh * k;
+                near = (cx - mid).abs() < (rw.max(200.0) / 2.0 + 40.0) * k && c.y >= p.y && cy < p.y as f64 + (rh.max(34.0) + 40.0) * k;
                 // Auto-hide: hidden while an app is under the notch's spot. Coming close isn't enough to bring it
                 // back, or it would pop up over browser tabs right when you click them. Instead, rest the mouse on
                 // the top edge of the screen for a moment; once it's out it stays while the mouse is on it.
@@ -246,11 +274,16 @@ fn notch_hover(app: &AppHandle) {
                 }
             }
             inside &= show;
+            // A drag (button held) coming close lets the mouse through too, so files dragged from Explorer reach the
+            // notch's drop handler. The page only opens the shelf once a file drag actually enters.
+            let catch = inside || (show && near && NOTCH_DROPS.load(Relaxed) && mouse_down());
             if show != NOTCH_SHOWN.swap(show, Relaxed) {
                 let _ = app.emit_to("notch", "reveal", show);
             }
+            if catch != NOTCH_CATCH.swap(catch, Relaxed) {
+                let _ = w.set_ignore_cursor_events(!catch);
+            }
             if inside != NOTCH_IN.swap(inside, Relaxed) {
-                let _ = w.set_ignore_cursor_events(!inside);
                 let _ = app.emit_to("notch", "hover", inside);
             }
         }
@@ -1059,7 +1092,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors])
+        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());

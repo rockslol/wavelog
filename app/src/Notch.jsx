@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { condition, score, signed, WeatherIcon } from "./widgets";
 
@@ -35,6 +36,7 @@ const ICONS = {
   clock: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8z",
   valorant: "M2 4l11 14H8.5L2 9.6zM22 4v6l-4.6 5.5h-4.7z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  tray: "M3 13h5l1.5 2.5h5L16 13h5v7H3zM6 4h12l2.6 7H15l-1.5 2.5h-3L9 11H3.4z",
   bell: "M12 2a6 6 0 0 0-6 6v4.6L4 16v1h16v-1l-2-3.4V8a6 6 0 0 0-6-6zM10 19a2 2 0 0 0 4 0z",
   timer: "M9 2h6v2H9zM12 5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 1 0 0-17zM12 7a6.5 6.5 0 1 1 0 13 6.5 6.5 0 1 1 0-13zM11 9.5h2v5h-2z",
   calendar: "M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 8v10h12V10z",
@@ -71,7 +73,7 @@ const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
 const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
 const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
-  outputs: "speaker", downloads: "download", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
+  outputs: "speaker", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", valorant: "valorant", steam: "controller" };
 
 function stored(key) {
   try {
@@ -134,6 +136,9 @@ export default function Notch() {
   const [outs, setOuts] = useState(null);
   const [edit, setEdit] = useState(null); // section order while arranging the dashboard (Settings > Notch > Edit)
   const [dragging, setDragging] = useState(null);
+  const [dropping, setDropping] = useState(0); // files being dragged over the notch
+  const [shelf, setShelf] = useState([]);
+  const dragged = useRef(false);
   const editing = useRef(false), drag = useRef(null), rects = useRef({});
   const [, tick] = useState(0);
   const timer = useRef(0), full = useRef(null), root = useRef(null), lastId = useRef(null), lastWheel = useRef(0), lastSet = useRef(0);
@@ -210,6 +215,17 @@ export default function Notch() {
         setOpen(true);
       }),
       listen("reveal", (e) => setReveal(e.payload)),
+      getCurrentWebview().onDragDropEvent((e) => {
+        const p = e.payload;
+        if (!opts.current.shelf || p.type === "over") return;
+        if (p.type === "enter") return p.paths.length && setDropping(p.paths.length);
+        setDropping(0);
+        if (p.type === "drop" && p.paths.length) {
+          setOpen(true);
+          fetch(API + "/shelf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paths: p.paths }) })
+            .then((r) => r.json()).then(setShelf).catch(() => {});
+        }
+      }),
       listen("sysvol", (e) => opts.current.osd && (setOsdVol({ level: e.payload[0], muted: e.payload[1] }), setOsd(Date.now()))),
       listen("level", (e) => {
         const p = e.payload;
@@ -243,6 +259,10 @@ export default function Notch() {
     }
     lastId.current = now.id;
   }, [now?.id]);
+  const loadShelf = () => get("/shelf").then(setShelf).catch(() => {});
+  useEffect(() => {
+    if (o.shelf) loadShelf();
+  }, [open, o.shelf]);
   const loadOuts = () => invoke("audio_outputs").then(setOuts).catch(() => {});
   const realOuts = (outs || []).filter(([, n]) => !/steam streaming/i.test(n)); // Steam Remote Play's virtual devices
   useEffect(() => {
@@ -356,13 +376,13 @@ export default function Notch() {
   const alerts = o.alerts ? acts : [];
   const kind = playing ? "music" : alerts[0] ? "act" : "idle";
   const away = o.autohide && !reveal && !vol;
-  const state = open || edit ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
+  const state = open || edit || dropping ? "open" : toast ? "peek" : away ? "gone" : peek && has ? "peek" : kind === "idle" && o.idle === "hide" && !vol ? "gone" : "mini";
   const bubble = (state === "mini" || state === "peek") && (kind === "music" || state === "peek" ? alerts[0] : kind === "act" ? alerts[1] : null);
   const miniW = vol || line ? 340 : kind !== "idle" ? 250 : o.idle === "time" ? 120 : 210;
   const [w, h, r] = { gone: [120, 34, 17], mini: [miniW, 34, 17], peek: toast ? [toast.kind === "shot" ? 440 : toast.kind === "notif" ? 420 : 400, 86, 30] : [380, 72, 28], open: [460, fullH, 32] }[state];
   useEffect(() => {
-    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit });
-  }, [w, h, !!bubble, state === "gone", o.autohide, !!edit]);
+    invoke("notch", { w: state === "gone" ? 0 : w + 20 + (bubble ? 2 * 100 : 0), h, autohide: o.autohide && !edit && !dropping, drops: o.shelf });
+  }, [w, h, !!bubble, state === "gone", o.autohide, !!edit, !!dropping, o.shelf]);
   const shotDo = (id, what) => fetch(`${API}/pc/shot/${id}/${what}`, { method: "POST" }).then(() => setToast(null)).catch(() => {});
   const stop = (e) => e.stopPropagation();
   const appIcon = (aumid) => `${API}/pc/app-icon?aumid=${encodeURIComponent(aumid)}`;
@@ -384,6 +404,23 @@ export default function Notch() {
     </div>
   );
   const priv = o.privacy && (mics.length > 0 || cams.length > 0);
+  // Shelf: drag a file out once the mouse has moved a few pixels with the button held; a plain click opens it.
+  const dragOut = (files) => (e) => {
+    if (e.button !== 0 || e.target.closest(".n-fx, .n-ff")) return;
+    dragged.current = false;
+    const [x0, y0] = [e.clientX, e.clientY];
+    const end = () => (removeEventListener("pointermove", move), removeEventListener("pointerup", end));
+    const move = (m) => {
+      if (!(m.buttons & 1)) return end();
+      if (Math.hypot(m.clientX - x0, m.clientY - y0) < 6) return;
+      end();
+      dragged.current = true;
+      invoke("shelf_drag", { paths: files.map((f) => f.path) }).finally(loadShelf);
+    };
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", end);
+  };
+  const shelfDo = (method, path) => fetch(API + "/shelf" + path, { method }).then((r) => r.json()).then((l) => Array.isArray(l) && setShelf(l)).catch(() => {});
 
   const press = (key) => {
     invoke("media", { key });
@@ -442,6 +479,7 @@ export default function Notch() {
     outputs: outNow ? outName(outNow[1])[0] : "Headphones or speakers",
     downloads: dls?.active?.length ? `${dls.active.length} downloading` : "While a browser downloads",
     notifications: notifList.length ? `${notifList.length} from today` : "Messages from your apps",
+    shelf: shelf.length ? `${shelf.length} on the shelf` : "Drag files onto the notch",
     todos: openTodos.length ? `${openTodos.length} left` : "Your to-do list",
     valorant: "Right after a match",
     steam: steamD?.connected && !steamD.error && !steamD.private ? `${steamD.friends.length} friends online` : "Friends online and in game",
@@ -670,6 +708,26 @@ export default function Notch() {
         ))}
       </div>
     ),
+    shelf: o.shelf && shelf.length > 0 && (
+      <div className="n-shelf">
+        <div className="n-th">
+          <Icon d="tray" />Shelf<em>{shelf.length}</em>
+          {shelf.length > 1 && <span className="n-clear n-dragall" title="Drag all of them out at once" onPointerDown={dragOut(shelf)}>Drag all</span>}
+          <button className="n-clear" onClick={(e) => (stop(e), shelfDo("DELETE", ""))}>Clear</button>
+        </div>
+        <div className="n-files">
+          {shelf.map((f) => (
+            <div key={f.id} className="n-file" title={`${f.name}\nClick to open, drag out to use it somewhere`} onPointerDown={dragOut([f])}
+              onClick={(e) => (stop(e), !dragged.current && shelfDo("POST", `/${f.id}/open`))}>
+              <span className="n-fimg"><img src={`${API}/shelf/${f.id}/thumb`} draggable={false} onError={hideBroken} /></span>
+              <span className="n-fname">{f.name}</span>
+              <button className="n-fx" title="Remove from the shelf" onClick={(e) => (stop(e), shelfDo("DELETE", "/" + f.id))}>×</button>
+              <button className="n-ff" title="Show in folder" onClick={(e) => (stop(e), invoke("reveal", { path: f.path }))}><Icon d="folder" /></button>
+            </div>
+          ))}
+        </div>
+      </div>
+    ),
     notifications: notifList.length > 0 && (
       <div className="n-notifs">
         <div className="n-th"><Icon d="bell" />Notifications<button className="n-clear" onClick={(e) => (stop(e), clearNotifs())}>Clear</button></div>
@@ -758,7 +816,14 @@ export default function Notch() {
           </>}
         </div>
         <div className="n-full" ref={full}>
-          {editor || <>
+          {editor || (dropping ? <>
+            <div className="n-drop">
+              <Icon d="tray" />
+              <b>Drop to keep on the shelf</b>
+              <small>{dropping === 1 ? "1 item" : `${dropping} items`} · drag {dropping === 1 ? "it" : "them"} out again whenever you need {dropping === 1 ? "it" : "them"}</small>
+            </div>
+            {parts.shelf}
+          </> : <>
           {signin && (
             <div className="n-acts">
               <button className="n-act n-signin" onClick={() => (now.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>
@@ -791,7 +856,7 @@ export default function Notch() {
             {has && up?.device && <span><Icon d={up.kind} />{up.device}</span>}
             <button onClick={openStats}><Icon d="chart" />Stats</button>
           </div>
-          </>}
+          </>)}
         </div>
       </div>
       {bubble && (

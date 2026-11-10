@@ -33,12 +33,18 @@
       if (view) {
         if (q.get("timer")) localStorage.setItem("timer", JSON.stringify({ mode: "focus", end: Date.now() + 1093000 }));
         let n = 0, sent = false;
+        const subs = {};
         window.__TAURI_INTERNALS__ = {
           metadata: { currentWindow: { label: view }, currentWebview: { label: view, windowLabel: view } },
           transformCallback: (fn) => ((window["_" + ++n] = fn), n),
-          invoke: async (cmd) => cmd === "backdrop" ? (sent ? new ArrayBuffer(0) : ((sent = true), stripes((innerWidth + 64) >> 1, (innerHeight + 64) >> 1)))
-            : cmd === "plugin:window|is_visible" ? true : cmd === "plugin:event|listen" ? 1 : null,
+          invoke: async (cmd, args) => cmd === "backdrop" ? (sent ? new ArrayBuffer(0) : ((sent = true), stripes((innerWidth + 64) >> 1, (innerHeight + 64) >> 1)))
+            : cmd === "plugin:window|is_visible" ? true : cmd === "plugin:event|listen" ? ((subs[args.event] ||= []).push(args.handler), args.handler)
+            : ["mic_users", "camera_users", "audio_outputs", "monitors"].includes(cmd) ? [] : null,
         };
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+        // Fake Tauri events: &emit=[[ms, "event", payload], ...], e.g. [[500,"hover",true]] or [[500,"tauri://drag-enter",{"paths":["C:\a.txt"]}]]
+        window.__emit = (event, payload) => (subs[event] || []).forEach((h) => window["_" + h]?.({ event, id: 0, payload }));
+        for (const [t, ev, p] of JSON.parse(q.get("emit") || "[]")) setTimeout(() => window.__emit(ev, p), t);
         import("/src/main.jsx");
       } else if (q.get("one")) {
         const f = document.createElement("iframe");
