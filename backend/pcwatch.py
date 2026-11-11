@@ -271,6 +271,10 @@ def kind(name):
         return "controller"
     if any(w in n for w in ("head", "buds", "airpods", "earphone", "wh-", "wf-", "arctis", "hyperx", "audio", "speaker")):
         return "headset"
+    if any(w in n for w in ("keyboard", "keypad", "keychron")) or re.search(r"\b(kb|keys)\b", n):
+        return "keyboard"
+    if any(w in n for w in ("mouse", "trackball", "mx master", "mx anywhere", "mx ergo", "mx vertical")):
+        return "mouse"
     return "device"
 
 
