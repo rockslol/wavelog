@@ -2,22 +2,22 @@
 
 A Windows app that records everything you play on Spotify and turns it into stats, desktop widgets and a Dynamic-Island-style notch. Liquid-glass look, everything stored on your own PC.
 
-- **Stats window**: overview (minutes, streaks, top tracks/artists/albums, listening by hour and weekday, heatmaps, song of the day, most skipped), a Wrapped for any year, track and artist pages, full-screen karaoke lyrics, gaming time and a Valorant tracker.
-- **Desktop widgets**: now playing, lyrics, calendar, photos, weather, PC monitor, clock, countdown, to-do, note, focus timer, Valorant. Real glass that refracts what's behind it, Small/Medium/Large, snapping, a widget stack.
+- **Stats window**: overview (minutes, streaks, top tracks/artists/albums, listening by hour and weekday, heatmaps, song of the day, most skipped, risers and fallers against the period before), a Wrapped for any year compared with the year before, track and artist pages, full-screen karaoke lyrics, and gaming time with your Steam friends, achievements and wishlist sales.
+- **Desktop widgets**: now playing, lyrics, calendar, photos, weather, PC monitor, clock, countdown, to-do, note, focus timer. Real glass that refracts what's behind it, Small/Medium/Large, snapping, a widget stack.
 - **Notch**: a pill at the top of the screen with the current song, live lyrics, media controls, Spotify volume and alerts. Hover it for a dashboard you can rearrange: clock, weather, focus timer, next event, PC load, to-dos, batteries, sound output, downloads and more.
-- **Your PC in the notch**: mic and camera dots, screenshot and download pop-outs, notifications from your apps (sender and message, per-app mute), and a **file shelf**: drag files onto the notch to park them, drag them out later into a chat, a browser or a folder.
+- **Your PC in the notch**: mic and camera dots, screenshot and download pop-outs, network speed and offline alerts, Steam wishlist sales, notifications from your apps (sender and message, per-app mute), and a **file shelf**: drag files onto the notch to park them, drag them out later into a chat, a browser or a folder.
 - **Imports**: your full Spotify history export, and every Last.fm scrobble.
 - **Private**: no account and no server. Your listening database lives in `%APPDATA%\Wavelog`.
 
-> Not affiliated with or endorsed by Spotify, Riot Games or Last.fm.
+> Not affiliated with or endorsed by Spotify, Valve, Riot Games or Last.fm.
 
 ![Overview](docs/screenshots/overview.png)
 
-| Lyrics | Notch |
+| Wrapped | Lyrics |
 |---|---|
-| ![Lyrics](docs/screenshots/lyrics.png) | ![Notch](docs/screenshots/notch.png) |
+| ![Wrapped](docs/screenshots/wrapped.png) | ![Lyrics](docs/screenshots/lyrics.png) |
 
-![Valorant](docs/screenshots/valorant.png)
+<p align="center"><img src="docs/screenshots/notch.png" alt="Notch dashboard" width="420"></p>
 
 ## Install
 
@@ -102,7 +102,6 @@ backend/        the logger: FastAPI on 127.0.0.1:8721, SQLite, runs as wavelog-l
 - **Song details**: imports without album or cover info are looked up one by one in the background.
 - **Glass**: each widget captures the screen just around itself at half resolution and a WebGL shader blurs, refracts and lights it. It never captures itself, so widgets show up in screenshots and screen shares.
 - **Widgets** sit on the desktop under your apps and come back after Win+D. They pause while a fullscreen game is in front, unless set to *Over games*.
-- **Valorant**: while the Riot Client runs, the logger reads its lockfile and calls Riot's own unofficial player endpoints for your account only (match history, RR, rank). It never touches the game. These endpoints can break after a patch.
 - **Local API**: everything the UI shows comes from the logger. Browse it at <http://127.0.0.1:8721/docs> while the app runs.
 
 ## License

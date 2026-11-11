@@ -21,8 +21,6 @@
       };
       const real = window.fetch;
       window.fetch = (url, o) => real(q.get("api") ? String(url).replace("127.0.0.1:8721", "127.0.0.1:" + q.get("api")) : url, o).then(async (r) => {
-        if (String(url).endsWith("/valorant")) return real("/valorant-mock.json");
-        if (String(url).endsWith("/valorant/live")) return real("/valorant-live-mock.json");
         if (String(url).endsWith("/now")) return new Response(JSON.stringify({ color: [0.42, 0.18, 0.26], ...(await r.json()) }));
         if (!String(url).endsWith("/settings") || o?.method) return r;
         const s = await r.json(), d = new Date(), day = (n) => new Date(d.getTime() + n * 864e5).toISOString().slice(0, 10);
