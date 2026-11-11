@@ -346,8 +346,11 @@ def adopt_valorant():
     from widgets import FILE, settings
     if state.get("_moved_valorant"):
         return
-    state["_moved_valorant"] = True
-    if settings.get("valorant") and not (ROOT / "valorant").exists() and (src := bundled("valorant")):
+    if settings.get("valorant") and not (ROOT / "valorant").exists():
+        src = bundled("valorant")
+        if not src:
+            log.warning("The Valorant plugin isn't in this build, so Valorant wasn't moved. Trying again next start")
+            return
         shutil.copytree(src, ROOT / "valorant", ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"))
         state.setdefault("valorant", {})["enabled"] = True
         state["_notice"] = {"id": "valorant", "title": "Valorant is a plugin now",
@@ -363,6 +366,7 @@ def adopt_valorant():
             n["sections"] = ["p_valorant_last_match" if s == "valorant" else s for s in n["sections"]]
         FILE.write_text(json.dumps(settings, indent=2))
         log.info("Valorant moved into its plugin")
+    state["_moved_valorant"] = True
     save_state()
 
 
