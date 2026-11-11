@@ -269,7 +269,9 @@ def kind(name):
     n = name.lower()
     if any(w in n for w in ("controller", "gamepad", "dualsense", "dualshock", "xbox")):
         return "controller"
-    if any(w in n for w in ("head", "buds", "airpods", "earphone", "wh-", "wf-", "arctis", "hyperx", "audio", "speaker")):
+    if any(w in n for w in ("head", "buds", "airpods", "earphone", "wh-", "wf-", "arctis", "hyperx", "audio", "speaker",
+                            "hands-free", "handsfree", "jbl", "bose", "beats", "sennheiser", "momentum", "jabra", "soundcore",
+                            "skullcandy", "marshall", "nothing ear", "astro", "kraken", "barracuda", "blackshark", "turtle beach")):
         return "headset"
     if any(w in n for w in ("keyboard", "keypad", "keychron")) or re.search(r"\b(kb|keys)\b", n):
         return "keyboard"
@@ -311,7 +313,11 @@ def bluetooth():
                 if sa.SetupDiGetDevicePropertyW(h, ctypes.byref(d), ctypes.byref(key), ctypes.byref(t), buf, 512, ctypes.byref(need), 0):
                     name = buf.raw[:need.value].decode("utf-16-le", "ignore").rstrip("\0") or name
                     break
-            out.append({"name": name, "kind": kind(name), "level": min(level, 100), "text": f"{min(level, 100)}%"})
+            # Windows names a headset's call connection "<name> Hands-Free AG Audio": that tells the kind, then drop it.
+            short = re.sub(r"\s+(hands-?free( ag)?( audio)?|stereo|avrcp transport)$", "", name, flags=re.I) or name
+            if any(d["name"] == short for d in out):
+                continue
+            out.append({"name": short, "kind": kind(name), "level": min(level, 100), "text": f"{min(level, 100)}%"})
     finally:
         sa.SetupDiDestroyDeviceInfoList(h)
     return out
