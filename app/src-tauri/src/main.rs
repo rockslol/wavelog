@@ -134,9 +134,34 @@ fn layer(app: &AppHandle) {
     }
 }
 
+/// Something outside Wavelog sometimes drops the notch out of the always-on-top layer, and then every app covers it.
+/// Its WS_EX_TOPMOST flag doesn't show this (tao writes it back on each style change), so look at what's above it:
+/// if any of those windows isn't always-on-top, the notch was pushed down. Put it back.
+fn notch_on_top(app: &AppHandle) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let Some(h) = app.get_webview_window("notch").and_then(|w| w.hwnd().ok()).map(|h| h.0 as HWND) else { return };
+    unsafe {
+        if IsWindowVisible(h) == 0 {
+            return;
+        }
+        let mut above = GetWindow(h, GW_HWNDPREV);
+        for _ in 0..1000 {
+            if above.is_null() {
+                return;
+            }
+            if GetWindowLongPtrW(above, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST == 0 {
+                SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                return;
+            }
+            above = GetWindow(above, GW_HWNDPREV);
+        }
+    }
+}
+
 unsafe extern "system" fn on_foreground(_: windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
     let Some(app) = APP.get() else { return };
     layer(app);
+    notch_on_top(app);
     let app = app.clone();
     thread::spawn(move || {
         for ms in [300, 700] {
@@ -1146,6 +1171,7 @@ fn main() {
                 if f != FULLSCREEN.swap(f, Relaxed) {
                     sync(&handle);
                 }
+                notch_on_top(&handle);
                 thread::sleep(Duration::from_secs(1));
             });
             Ok(())
