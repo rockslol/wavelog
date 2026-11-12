@@ -1461,6 +1461,49 @@ function SettingsSearch({ setPage }) {
   );
 }
 
+// A saved key is never shown in full, so it can't leak in a screenshot or a screen share: only its last 4 characters,
+// with Change (and Remove where an empty key means "disconnect").
+function SecretField({ label, value, placeholder, save, removable }) {
+  const [edit, setEdit] = useState(false);
+  const [v, setV] = useState("");
+  const [sure, setSure] = useState(false);
+  useEffect(() => {
+    if (!sure) return;
+    const t = setTimeout(() => setSure(false), 4000);
+    return () => clearTimeout(t);
+  }, [sure]);
+  if (value && !edit) {
+    return (
+      <div className="field">
+        <span>{label}</span>
+        <div className="secret">
+          <code className="mono">{"•".repeat(12)}{value.slice(-4)}</code>
+          <span className="grow" />
+          <button className="link" onClick={() => (setV(""), setEdit(true))}>Change</button>
+          {removable && (
+            <button className={"link" + (sure ? " danger" : "")} onClick={() => (sure ? (setSure(false), save("")) : setSure(true))}>
+              {sure ? "Click again to remove" : "Remove"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+  const done = () => {
+    const x = v.trim();
+    if (x && x !== value) save(x);
+    setEdit(false);
+    setV("");
+  };
+  return (
+    <label className="field">
+      <span>{label}{edit && " · leave it empty to keep the saved one"}</span>
+      <input value={v} placeholder={placeholder} autoFocus={edit} spellCheck={false} autoComplete="off" onChange={(e) => setV(e.target.value)} onBlur={done}
+        onKeyDown={(e) => (e.key === "Enter" ? e.currentTarget.blur() : e.key === "Escape" && (setV(""), setEdit(false)))} />
+    </label>
+  );
+}
+
 export const Row = ({ label, hint, children }) => (
   <div className="row">
     <div className="row-label">{label}{hint && <span className="hint">{hint}</span>}</div>
@@ -1699,7 +1742,7 @@ function Settings({ tab, setTab }) {
           hint={!nowA ? "Checking" : nowA.auth === "ok" ? "Signed in, plays are being recorded" : nowA.auth === "no_client_id" ? "Paste your Client ID below to start" : "Signed out. Plays aren't being recorded"}>
           {nowA?.auth !== "no_client_id" && <button className="pill glass" onClick={() => invoke("open_url", { url: "http://127.0.0.1:8721/login" })}>{nowA?.auth === "ok" ? "Sign in again" : "Sign in"}</button>}
         </Row>
-        <label className="field"><span>Client ID from developer.spotify.com/dashboard</span><input {...field("client_id")} placeholder="Paste your app's Client ID" /></label>
+        <SecretField label="Client ID from developer.spotify.com/dashboard" value={s.client_id} placeholder="Paste your app's Client ID" save={(v) => set({ client_id: v })} />
         <div className="field"><span>Redirect URI to add in the dashboard</span><code className="mono">{s.redirect}</code></div>
       </section>
       <section className="card group">
@@ -1710,14 +1753,16 @@ function Settings({ tab, setTab }) {
         {lf?.running && <Row label="Importing" hint={lfProgress(lf)} />}
         {lf?.running && <div className="lf-bar"><div style={{ width: (lf.total ? (lf.done / lf.total) * 100 : 3) + "%" }} /></div>}
         <label className="field"><span>Last.fm username</span><input {...field("lastfm_user")} placeholder="Your Last.fm username" /></label>
-        <label className="field"><span>API key, make one free at last.fm/api/account/create</span><input {...field("lastfm_key")} placeholder="32 letters and numbers" /></label>
+        <SecretField label="API key, make one free at last.fm/api/account/create" value={s.lastfm_key} placeholder="32 letters and numbers"
+          save={(v) => set({ lastfm_key: v })} removable />
       </section>
       <p className="hint foot-note">Adds every scrobble to your stats, matched to Spotify songs. Plays you already have are skipped, so nothing counts twice. After the first import it syncs new scrobbles every 30 minutes, including from your phone while this PC was off.</p>
       <section className="card group">
         <Row label={<span className="dot-label"><i className={acc[2][1]} />Steam</span>}
           hint={!steamD?.connected ? "Not connected. Recent games, achievements and friends online" : steamD.error ? steamD.error
             : `Signed in as ${steamD.me?.name || "you"}${steamD.private ? " · friends list is private" : ""}`} />
-        <label className="field"><span>Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)</span><input {...field("steam_key")} placeholder="32 letters and numbers" /></label>
+        <SecretField label="Steam Web API key, get one at steamcommunity.com/dev/apikey (any domain works, e.g. localhost)" value={s.steam_key}
+          placeholder="32 letters and numbers" save={(v) => set({ steam_key: v })} removable />
         <label className="field"><span>SteamID64, found automatically from Steam on this PC</span><input {...field("steam_id")} placeholder={steamId?.steam_id || "76561…"} /></label>
         <Row label="Wishlist sale alerts" hint="The notch tells you when a game on your wishlist goes on sale or gets cheaper. Works without an API key">{nSwitch("steam_sales")}</Row>
       </section>

@@ -1291,6 +1291,22 @@ input[type="range"] {
   display: flex;
   gap: 14px;
 }
+.secret {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+}
+.secret .mono {
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+.secret .grow {
+  flex: 1;
+}
 .field-row .field {
   flex: 1;
 }
