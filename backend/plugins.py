@@ -14,6 +14,7 @@ import importlib.util
 import inspect
 import json
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -27,7 +28,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import poller
 import wavelog
@@ -535,11 +536,14 @@ async def inspect_plugin(body: dict = Body(...)):
             "installed": have.manifest.get("version") if have and not have.dev else None}
 
 
-@router.post("/plugins/install")
-async def install(body: dict = Body(...)):
+async def install_path(path, check=None):
+    """Install (or update) a plugin from a folder or zip. `check(manifest)` can refuse it before anything changes.
+    A new plugin starts on; an update keeps whatever on/off and settings it had."""
     try:
-        folder, _ = unpack(body.get("path", ""))
+        folder, _ = unpack(path)
         m = read_manifest(folder)
+        if check:
+            check(m)
         pid, dest, tmp = m["id"], ROOT / m["id"], ROOT / f".{m['id']}-new"
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.copytree(folder, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"))
@@ -551,11 +555,16 @@ async def install(body: dict = Body(...)):
         await stop(pl)
     shutil.rmtree(dest, ignore_errors=True)
     tmp.rename(dest)
-    state.setdefault(pid, {})["enabled"] = True
+    state.setdefault(pid, {}).setdefault("enabled", True)
     save_state()
     await reload(pid)
     log.info("Installed plugin %s %s", pid, m.get("version", ""))
     return info(loaded[pid])
+
+
+@router.post("/plugins/install")
+async def install(body: dict = Body(...)):
+    return await install_path(body.get("path", ""))
 
 
 @router.post("/plugins/dev")
@@ -604,13 +613,147 @@ async def remove(pid: str):
     return {"ok": True}
 
 
+# --- Browse: the registry ------------------------------------------------------------------------------------------
+# registry.json in github.com/rockslol/wavelog-plugins lists the reviewed plugins. Each entry pins its zip by sha256,
+# so a zip that changes after review is refused. WAVELOG_REGISTRY points somewhere else (a URL or a file) for testing.
+REGISTRY = os.environ.get("WAVELOG_REGISTRY") or "https://raw.githubusercontent.com/rockslol/wavelog-plugins/main/registry.json"
+LINKS = ("https://", "http://127.0.0.1:") if os.environ.get("WAVELOG_REGISTRY") else ("https://",)
+MAX_ZIP = 20 * 1024 * 1024
+registry = {"at": 0.0, "plugins": None, "error": None}
+icons = {}  # plugin id -> (bytes, media type)
+
+
+async def read_registry(fresh=False):
+    """The registry's entries, kept for 30 minutes. fresh=True reads it again (before installing, so the sha256 is
+    the current one)."""
+    if not fresh and registry["plugins"] is not None and time.time() - registry["at"] < 1800:
+        return registry["plugins"]
+    try:
+        if "://" in REGISTRY:
+            r = await http.get(REGISTRY, headers={"Cache-Control": "no-cache"})
+            r.raise_for_status()
+            data = r.json()
+        else:
+            data = json.loads(Path(REGISTRY).read_text("utf-8"))
+        if data.get("registry") != 1 or not isinstance(data.get("plugins"), list):
+            raise ValueError("unknown registry format")
+        plugins = [e for e in data["plugins"] if isinstance(e, dict) and ID.match(str(e.get("id", "")))
+                   and re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256", ""))) and str(e.get("url", "")).startswith(LINKS)]
+        registry.update(at=time.time(), plugins=plugins, error=None)
+        icons.clear()
+    except Exception as e:
+        log.warning("Couldn't read the plugin registry: %s", e)
+        registry.update(at=time.time(), error="Couldn't load the plugin list. Check your internet connection")
+        if registry["plugins"] is None:
+            raise HTTPException(502, registry["error"])
+    return registry["plugins"]
+
+
+def fits(e):
+    """None if this Wavelog can run the entry, otherwise why not."""
+    if e.get("api", 1) != wavelog.API:
+        return "Made for a different Wavelog plugin API"
+    if version_tuple(e.get("min_app", "0")) > version_tuple(VERSION):
+        return f"Needs Wavelog {e['min_app']} or newer"
+    return None
+
+
+def updates():
+    """Installed plugins with a newer version in the registry (from the last read, never waits on the network)."""
+    out = {}
+    for e in registry["plugins"] or []:
+        pl = loaded.get(e["id"])
+        if pl and not pl.dev and not fits(e) and version_tuple(e.get("version")) > version_tuple(pl.manifest.get("version", "0")):
+            out[e["id"]] = e["version"]
+    return out
+
+
+@router.get("/plugins/registry")
+async def browse(fresh: bool = False):
+    plugins = await read_registry(fresh)
+    up = updates()
+    out = []
+    for e in plugins:
+        pl = loaded.get(e["id"])
+        out.append({
+            "id": e["id"], "name": str(e.get("name") or e["id"]), "author": str(e.get("author", "")),
+            "description": str(e.get("description", "")), "version": str(e.get("version", "")), "official": bool(e.get("official")),
+            "source": e.get("source") if str(e.get("source", "")).startswith("https://") else None,
+            "icon": f"/plugins/registry/icon/{e['id']}" if str(e.get("icon", "")).startswith(LINKS) else None,
+            "uses": uses(e), "size": e.get("size"), "blocked": fits(e),
+            "installed": pl.manifest.get("version") if pl else None, "dev": bool(pl and pl.dev), "update": up.get(e["id"]),
+        })
+    return {"plugins": out, "error": registry["error"]}
+
+
+@router.get("/plugins/registry/icon/{pid}")
+async def registry_icon(pid: str):
+    """A registry plugin's icon, fetched by the logger so the app's security policy stays as tight as it is."""
+    if pid not in icons:
+        e = next((x for x in registry["plugins"] or [] if x["id"] == pid), None)
+        url = str((e or {}).get("icon", ""))
+        ext = Path(url.split("?")[0]).suffix.lower()
+        if not url.startswith(LINKS) or ext not in IMAGES:
+            raise HTTPException(404)
+        try:
+            r = await http.get(url)
+            r.raise_for_status()
+        except httpx.HTTPError:
+            raise HTTPException(502)
+        if len(r.content) > 500_000:
+            raise HTTPException(415)
+        icons[pid] = (r.content, IMAGES[ext])
+    data, kind = icons[pid]
+    return Response(data, media_type=kind, headers={"Cache-Control": "max-age=3600"})
+
+
+async def fetch_zip(url):
+    data = bytearray()
+    async with http.stream("GET", url) as r:
+        r.raise_for_status()
+        async for chunk in r.aiter_bytes():
+            data += chunk
+            if len(data) > MAX_ZIP:
+                raise ValueError("The download is over 20 MB")
+    return bytes(data)
+
+
+@router.post("/plugins/get")
+async def get_plugin(body: dict = Body(...)):
+    """Install or update a plugin from the registry: download its zip, check it against the sha256 the registry pins,
+    and install it only if they match."""
+    pid = str(body.get("id", ""))
+    e = next((x for x in await read_registry(fresh=True) if x["id"] == pid), None)
+    if not e:
+        raise HTTPException(404, "That plugin isn't in the list anymore")
+    if why := fits(e):
+        raise HTTPException(400, why)
+    try:
+        data = await fetch_zip(e["url"])
+    except Exception as err:
+        log.warning("Downloading plugin %s failed: %s", pid, err)
+        raise HTTPException(502, "Couldn't download it. Try again in a bit")
+    if hashlib.sha256(data).hexdigest() != e["sha256"]:
+        log.warning("Plugin %s: the download doesn't match the registry's sha256, refused", pid)
+        raise HTTPException(400, "The download doesn't match the reviewed version, so it wasn't installed")
+    TMP.mkdir(parents=True, exist_ok=True)
+    f = TMP / f"{uuid.uuid4().hex}.zip"
+    f.write_bytes(data)
+
+    def same(m):
+        if m["id"] != pid or str(m.get("version")) != str(e.get("version")):
+            raise ValueError("The download isn't the plugin the list describes")
+
+    return await install_path(f, check=same)
+
+
 # --- Settings > Plugins --------------------------------------------------------------------------------------------
 @router.get("/plugins")
 async def list_plugins():
     _, errors = discover()
     broken = [{"path": str(f), "error": str(e)} for f, e in errors]
     return {"plugins": [info(pl) for pl in sorted(loaded.values(), key=lambda p: p.manifest["name"].lower())],
-            "broken": broken, "folder": str(ROOT), "api": wavelog.API, "notice": state.get("_notice")}
+            "broken": broken, "folder": str(ROOT), "api": wavelog.API, "notice": state.get("_notice"), "updates": updates()}
 
 
 def coerce(spec, v):

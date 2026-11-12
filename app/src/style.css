@@ -6009,6 +6009,14 @@ button.n-dl:hover {
   font-weight: 650;
   color: #ffd60a;
 }
+.pl-badge.official {
+  background: hsl(var(--ah) var(--as) 60% / 0.18);
+  color: hsl(var(--ah) var(--as) 78%);
+}
+.pl-warn.calm {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-2);
+}
 .pl-card.off .pl-name {
   opacity: 0.6;
 }

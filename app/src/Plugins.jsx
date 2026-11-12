@@ -295,9 +295,15 @@ function SettingField({ spec, value, save }) {
   );
 }
 
-function PluginCard({ p, setTab }) {
+function PluginCard({ p, setTab, update, onUpdate }) {
   const [msg, setMsg] = useState(null);
   const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const doUpdate = () => {
+    setBusy(true);
+    setMsg(null);
+    onUpdate(p.id).then(() => setMsg(`Updated to v${update}`), (e) => setMsg(e.message)).finally(() => setBusy(false));
+  };
   const act = (path, method, body, done) => send(path, method, body).then((r) => (setMsg(done || null), loadPlugins(), r)).catch((e) => setMsg(e.message));
   useEffect(() => {
     if (!sure) return;
@@ -325,6 +331,7 @@ function PluginCard({ p, setTab }) {
         {p.uses.length > 0 && <span className="hint">{p.uses.join(" · ")}</span>}
         <span className="grow" />
         {msg && <span className="hint">{msg}</span>}
+        {update && <button className="pill glass" disabled={busy} onClick={doUpdate}>{busy ? "Updating…" : `Update to v${update}`}</button>}
         {p.enabled && !p.error && p.pages.map((pg) => (
           <button key={pg.id} className="link" onClick={() => setTab(`p.${p.id}.${pg.id}`)}>Open {pg.title}</button>
         ))}
@@ -338,20 +345,49 @@ function PluginCard({ p, setTab }) {
   );
 }
 
+// One plugin from the registry, in Settings > Plugins > Get plugins.
+function BrowseRow({ e, pick }) {
+  const by = [e.author && "by " + e.author, e.version && "v" + e.version].filter(Boolean).join(" · ");
+  const right = e.dev ? <span className="hint">Loaded from a folder</span>
+    : e.blocked ? <span className="hint">{e.blocked}</span>
+    : e.update ? <button className="pill glass" onClick={pick}>Update</button>
+    : e.installed ? <span className="hint">Installed</span>
+    : <button className="pill glass" onClick={pick}>Install</button>;
+  return (
+    <Row label={
+      <span className="pl-name">
+        {e.icon ? <img src={pimg(e.icon)} draggable={false} /> : <i className="pl-noicon" />}
+        {e.name}{e.official && <em className="pl-badge official">Official</em>}
+      </span>
+    } hint={[e.description, by].filter(Boolean).join(" · ")}>{right}</Row>
+  );
+}
+
 export function PluginSettings({ setTab }) {
   const d = usePlugins();
   const [path, setPath] = useState("");
   const [devPath, setDevPath] = useState("");
-  const [preview, setPreview] = useState(null); // {path, info} waiting for "Install"
+  const [preview, setPreview] = useState(null); // {path, info} from a file or {id, info} from Browse, waiting for "Install"
   const [msg, setMsg] = useState(null);
   const [over, setOver] = useState(false);
+  const [reg, setReg] = useState(null); // the registry: {plugins, error}
+  const [busy, setBusy] = useState(false);
+  const loadReg = (fresh) => send(`/plugins/registry${fresh ? "?fresh=true" : ""}`, "GET")
+    .then(setReg).catch((e) => setReg({ plugins: [], error: e.message }));
+  useEffect(() => void loadReg(false), []);
   const inspect = (p) => {
     setMsg(null);
     send("/plugins/inspect", "POST", { path: p }).then((info) => setPreview({ path: p, info })).catch((e) => setMsg(e.message));
   };
-  const install = () => send("/plugins/install", "POST", { path: preview.path })
-    .then((r) => (setMsg(`${r.name} is installed${r.pages.length ? ". It has a page in the sidebar" : ""}`), setPreview(null), setPath(""), loadPlugins()))
-    .catch((e) => setMsg(e.message));
+  // From Browse: the logger downloads the zip and installs it only if it matches the sha256 the registry pins.
+  const getPlugin = (id) => send("/plugins/get", "POST", { id }).then((r) => (loadPlugins(), loadReg(false), r));
+  const install = () => {
+    setBusy(true);
+    (preview.id ? getPlugin(preview.id) : send("/plugins/install", "POST", { path: preview.path }).then((r) => (loadPlugins(), r)))
+      .then((r) => (setMsg(`${r.name} is installed${r.pages.length ? ". It has a page in the sidebar" : ""}`), setPreview(null), setPath("")))
+      .catch((e) => setMsg(e.message))
+      .finally(() => setBusy(false));
+  };
   const addDev = () => send("/plugins/dev", "POST", { path: devPath })
     .then((r) => (setMsg(`${r.name} runs from its folder now and reloads when you save`), setDevPath(""), loadPlugins()))
     .catch((e) => setMsg(e.message));
@@ -370,8 +406,54 @@ export function PluginSettings({ setTab }) {
     return () => void off.then((f) => f());
   }, []);
   const plugins = d?.plugins || [];
+  const confirm = preview && (
+    <section className="card group pl-confirm">
+      <Row label={`${preview.info.installed ? "Update" : "Install"} ${preview.info.name}`}
+        hint={[preview.info.version && `v${preview.info.version}`, preview.info.author && `by ${preview.info.author}`,
+          preview.info.installed && `you have v${preview.info.installed}`].filter(Boolean).join(" · ")} />
+      {preview.info.description && <p className="pl-desc">{preview.info.description}</p>}
+      {preview.info.uses.length > 0 && <ul className="pl-uses">{preview.info.uses.map((u) => <li key={u}>{u}</li>)}</ul>}
+      {preview.id ? (
+        <p className="pl-warn calm">Reviewed before it was listed, and Wavelog checks that the download is exactly that version. Like every plugin, it runs with the same rights as Wavelog.</p>
+      ) : (
+        <p className="pl-warn">A plugin can do anything Wavelog can, like reading files and using the internet. Only install it if you trust who made it.</p>
+      )}
+      <div className="pl-foot">
+        <span className="grow" />
+        {msg && <span className="hint">{msg}</span>}
+        <button className="pill glass" onClick={() => (setPreview(null), setMsg(null))}>Cancel</button>
+        <button className="primary" disabled={busy} onClick={install}>
+          {busy ? (preview.id ? "Downloading…" : "Installing…") : preview.info.installed ? "Update" : "Install"}
+        </button>
+      </div>
+    </section>
+  );
+  const pick = (e) => (setMsg(null), setPreview({ id: e.id, info: e }));
   return (
     <>
+      <h4>Installed</h4>
+      {plugins.length ? plugins.map((p) => <PluginCard key={p.id} p={p} setTab={setTab} update={d?.updates?.[p.id]} onUpdate={getPlugin} />) : (
+        <section className="card group"><Row label="No plugins yet" hint="Plugins add pages, widgets and notch sections. Pick one below, or make your own" /></section>
+      )}
+      {d?.broken?.length > 0 && (
+        <section className="card group">
+          {d.broken.map((b) => <Row key={b.path} label="A plugin folder couldn't be read" hint={`${b.path}: ${b.error}`} />)}
+        </section>
+      )}
+      <h4>Get plugins</h4>
+      {preview?.id && confirm}
+      <section className="card group pl-browse">
+        {!reg ? <Row label="Loading the plugin list…" /> : reg.plugins.length === 0 ? (
+          <Row label={reg.error ? "Couldn't load the plugin list" : "No plugins listed yet"} hint={reg.error}>
+            <button className="link" onClick={() => (setReg(null), loadReg(true))}>Try again</button>
+          </Row>
+        ) : reg.plugins.map((e) => <BrowseRow key={e.id} e={e} pick={() => pick(e)} />)}
+      </section>
+      <p className="hint foot-note">
+        Every plugin here was reviewed before it was listed. Want yours here? See github.com/rockslol/wavelog-plugins.
+        {reg && <> <button className="link" onClick={() => loadReg(true)}>Refresh</button></>}
+      </p>
+      <h4>Install from a file</h4>
       <section className={"card group pl-drop" + (over ? " over" : "")}>
         <Row label="Install a plugin" hint="Drop a plugin's folder or .zip on this window, or paste where it is" />
         <div className="pl-path">
@@ -381,31 +463,7 @@ export function PluginSettings({ setTab }) {
         </div>
         {msg && !preview && <p className="hint pl-msg">{msg}</p>}
       </section>
-      {preview && (
-        <section className="card group pl-confirm">
-          <Row label={`${preview.info.installed ? "Update" : "Install"} ${preview.info.name}`}
-            hint={[preview.info.version && `v${preview.info.version}`, preview.info.author && `by ${preview.info.author}`,
-              preview.info.installed && `you have v${preview.info.installed}`].filter(Boolean).join(" · ")} />
-          {preview.info.description && <p className="pl-desc">{preview.info.description}</p>}
-          {preview.info.uses.length > 0 && <ul className="pl-uses">{preview.info.uses.map((u) => <li key={u}>{u}</li>)}</ul>}
-          <p className="pl-warn">A plugin can do anything Wavelog can, like reading files and using the internet. Only install it if you trust who made it.</p>
-          <div className="pl-foot">
-            <span className="grow" />
-            {msg && <span className="hint">{msg}</span>}
-            <button className="pill glass" onClick={() => (setPreview(null), setMsg(null))}>Cancel</button>
-            <button className="primary" onClick={install}>{preview.info.installed ? "Update" : "Install"}</button>
-          </div>
-        </section>
-      )}
-      <h4>Installed</h4>
-      {plugins.length ? plugins.map((p) => <PluginCard key={p.id} p={p} setTab={setTab} />) : (
-        <section className="card group"><Row label="No plugins yet" hint="Plugins add pages, widgets and notch sections. Anyone can make one" /></section>
-      )}
-      {d?.broken?.length > 0 && (
-        <section className="card group">
-          {d.broken.map((b) => <Row key={b.path} label="A plugin folder couldn't be read" hint={`${b.path}: ${b.error}`} />)}
-        </section>
-      )}
+      {preview?.path && confirm}
       <h4>Developer mode</h4>
       <section className="card group">
         <Row label="Load a folder" hint="Runs a plugin straight from its folder and reloads it every time you save a file. Nothing is copied" />
