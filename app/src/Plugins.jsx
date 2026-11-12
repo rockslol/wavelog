@@ -372,8 +372,10 @@ export function PluginSettings({ setTab }) {
   const [over, setOver] = useState(false);
   const [reg, setReg] = useState(null); // the registry: {plugins, error}
   const [busy, setBusy] = useState(false);
+  const [getMsg, setGetMsg] = useState(null); // the last install from Get plugins
+  // Reading the registry is also what tells the logger about updates, so the installed list is read again after it.
   const loadReg = (fresh) => send(`/plugins/registry${fresh ? "?fresh=true" : ""}`, "GET")
-    .then(setReg).catch((e) => setReg({ plugins: [], error: e.message }));
+    .then((r) => (setReg(r), loadPlugins().catch(() => {}))).catch((e) => setReg({ plugins: [], error: e.message }));
   useEffect(() => void loadReg(false), []);
   const inspect = (p) => {
     setMsg(null);
@@ -383,8 +385,14 @@ export function PluginSettings({ setTab }) {
   const getPlugin = (id) => send("/plugins/get", "POST", { id }).then((r) => (loadPlugins(), loadReg(false), r));
   const install = () => {
     setBusy(true);
-    (preview.id ? getPlugin(preview.id) : send("/plugins/install", "POST", { path: preview.path }).then((r) => (loadPlugins(), r)))
-      .then((r) => (setMsg(`${r.name} is installed${r.pages.length ? ". It has a page in the sidebar" : ""}`), setPreview(null), setPath("")))
+    const fromList = !!preview.id;
+    (fromList ? getPlugin(preview.id) : send("/plugins/install", "POST", { path: preview.path }).then((r) => (loadPlugins(), r)))
+      .then((r) => {
+        const done = `${r.name} is installed${r.pages.length ? ". It has a page in the sidebar" : ""}`;
+        fromList ? (setGetMsg(done), setMsg(null)) : (setMsg(done), setGetMsg(null));
+        setPreview(null);
+        setPath("");
+      })
       .catch((e) => setMsg(e.message))
       .finally(() => setBusy(false));
   };
@@ -448,10 +456,12 @@ export function PluginSettings({ setTab }) {
             <button className="link" onClick={() => (setReg(null), loadReg(true))}>Try again</button>
           </Row>
         ) : reg.plugins.map((e) => <BrowseRow key={e.id} e={e} pick={() => pick(e)} />)}
+        {getMsg && <p className="hint pl-msg">{getMsg}</p>}
       </section>
       <p className="hint foot-note">
-        Every plugin here was reviewed before it was listed. Want yours here? See github.com/rockslol/wavelog-plugins.
-        {reg && <> <button className="link" onClick={() => loadReg(true)}>Refresh</button></>}
+        Every plugin here was reviewed before it was listed.{" "}
+        <button className="link" onClick={() => invoke("open_url", { url: "https://github.com/rockslol/wavelog-plugins" })}>Make your own</button>
+        {reg && <> · <button className="link" onClick={() => loadReg(true)}>Refresh</button></>}
       </p>
       <h4>Install from a file</h4>
       <section className={"card group pl-drop" + (over ? " over" : "")}>
