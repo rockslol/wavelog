@@ -58,6 +58,21 @@ fn shown(label: &str) -> bool {
     visible() || (SHOWN.load(Relaxed) && OVERLAY.lock().unwrap().iter().any(|l| l == label))
 }
 
+/// Tells WebView2 whether its window is on screen. Hiding the window alone doesn't: the page keeps drawing and running
+/// its animations at the monitor's refresh rate (a hidden stats window and notch took ~40% of a core in games).
+/// Hidden, it stops drawing and trims its memory.
+fn webview_shown(w: &tauri::WebviewWindow, on: bool) {
+    let _ = w.with_webview(move |wv| unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::*;
+        use windows::core::Interface;
+        let c = wv.controller();
+        let _ = c.SetIsVisible(on);
+        if let Ok(v) = c.CoreWebView2().and_then(|v| v.cast::<ICoreWebView2_19>()) {
+            let _ = v.SetMemoryUsageTargetLevel(if on { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW });
+        }
+    });
+}
+
 fn sync(app: &AppHandle) {
     for (label, w) in app.webview_windows() {
         if label == "stats" || label.starts_with("po_") {
@@ -71,9 +86,11 @@ fn sync(app: &AppHandle) {
         }
         if !on {
             let _ = w.hide();
+            webview_shown(&w, false);
         } else if !w.is_visible().unwrap_or(true) {
             restore(app, &w);
             let _ = w.show();
+            webview_shown(&w, true);
         }
     }
     layer(app);
@@ -223,9 +240,8 @@ fn notch_monitor(app: AppHandle, name: String) {
 /// Screens for Settings > Notch: (name, is main screen, width, height) in physical pixels.
 #[tauri::command]
 fn monitors(app: AppHandle) -> Vec<(String, bool, u32, u32)> {
-    let Some(w) = app.get_webview_window("stats") else { return vec![] };
-    let main = w.primary_monitor().ok().flatten().and_then(|m| m.name().cloned());
-    w.available_monitors().unwrap_or_default().iter().filter_map(|m| {
+    let main = app.primary_monitor().ok().flatten().and_then(|m| m.name().cloned());
+    app.available_monitors().unwrap_or_default().iter().filter_map(|m| {
         let n = m.name()?.clone();
         Some((n.clone(), Some(&n) == main.as_ref(), m.size().width, m.size().height))
     }).collect()
@@ -566,6 +582,30 @@ const VIDEO_APPS: [&str; 11] = ["chrome.exe", "msedge.exe", "firefox.exe", "brav
     "mpc-hc64.exe", "mpc-be64.exe", "potplayermini64.exe", "microsoft.media.player.exe"];
 static DUCK_BASE: Mutex<Option<f32>> = Mutex::new(None); // Spotify's volume before the dip, put back on exit too
 
+/// The volume from before a dip, also on disk: if Wavelog is killed mid-dip (crash, update, Task Manager), the next start
+/// puts it back. Without this every restart dipped the already-dipped volume again (77% -> 38% -> 19% -> 10%).
+fn duck_file() -> Option<std::path::PathBuf> {
+    let dir = APP.get()?.path().app_data_dir().ok()?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("duck-base.txt"))
+}
+
+fn set_duck_base(v: Option<f32>) {
+    *DUCK_BASE.lock().unwrap() = v;
+    if let Some(f) = duck_file() {
+        let _ = match v {
+            Some(v) => std::fs::write(f, v.to_string()),
+            None => std::fs::remove_file(f),
+        };
+    }
+}
+
+fn take_duck_base() -> Option<f32> {
+    let v = DUCK_BASE.lock().unwrap().take();
+    set_duck_base(None);
+    v
+}
+
 #[derive(Clone, Copy)]
 struct DuckCfg {
     calls: bool,
@@ -611,18 +651,29 @@ fn fade(sessions: &[windows::Win32::Media::Audio::ISimpleAudioVolume], from: f32
 
 fn ducker() {
     use std::time::Instant;
-    let mut cfg = DuckCfg { calls: false, videos: false, games: false, level: 0.25 };
+    let (mut cfg, mut cfg_ok) = (DuckCfg { calls: false, videos: false, games: false, level: 0.25 }, false);
     let (mut cfg_at, mut state_at): (Option<Instant>, Option<Instant>) = (None, None);
     let (mut in_game, mut in_plugin) = (false, false);
     let (mut loud_start, mut loud_last): (Option<Instant>, Option<Instant>) = (None, None);
     let mut set_to: Option<f32> = None; // what we set while ducked
     let mut overridden = false; // the user moved the volume during a dip: leave it alone until the dip ends
     let mut clear_since: Option<Instant> = None;
+    let mut left_over = duck_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| t.trim().parse::<f32>().ok());
     loop {
-        if cfg_at.is_none_or(|t| t.elapsed() > Duration::from_secs(15)) {
+        if let Some(v) = left_over {
+            let sessions = spotify_sessions();
+            if !sessions.is_empty() {
+                set_spotify(&sessions, v);
+                set_duck_base(None);
+                left_over = None;
+            }
+        }
+        // Until the logger answers, the settings aren't known: no dip yet (it used the default 25% instead of the
+        // user's level for the first 15 s).
+        if !cfg_ok || cfg_at.is_none_or(|t| t.elapsed() > Duration::from_secs(15)) {
             cfg_at = Some(Instant::now());
             if let Some(c) = duck_cfg() {
-                cfg = c;
+                (cfg, cfg_ok) = (c, true);
             }
         }
         let on = cfg.calls || cfg.videos || cfg.games;
@@ -644,7 +695,7 @@ fn ducker() {
             }
             loud_start.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) // ignore short sounds
         };
-        let want = (on && (call || video || (cfg.games && in_game))) || in_plugin;
+        let want = cfg_ok && ((on && (call || video || (cfg.games && in_game))) || in_plugin);
 
         let sessions = spotify_sessions();
         match (sessions.first().and_then(|s| unsafe { s.GetMasterVolume() }.ok()), want) {
@@ -662,12 +713,12 @@ fn ducker() {
                             set_to = Some(target);
                         } else {
                             (set_to, overridden) = (None, true);
-                            *DUCK_BASE.lock().unwrap() = None;
+                            set_duck_base(None);
                         }
                     }
                 } else if !overridden {
                     let target = cur * cfg.level;
-                    *DUCK_BASE.lock().unwrap() = Some(cur);
+                    set_duck_base(Some(cur));
                     fade(&sessions, cur, target);
                     set_to = Some(target);
                 }
@@ -677,7 +728,7 @@ fn ducker() {
                 if let Some(t) = set_to {
                     // Wait 2 s so a pause in a call or video doesn't bounce the volume.
                     if clear_since.get_or_insert(Instant::now()).elapsed() >= Duration::from_secs(2) {
-                        if let Some(base) = DUCK_BASE.lock().unwrap().take() {
+                        if let Some(base) = take_duck_base() {
                             if (cur - t).abs() <= 0.03 {
                                 fade(&sessions, cur, base);
                             }
@@ -1295,16 +1346,59 @@ fn toggle(app: &AppHandle) {
     sync(app);
 }
 
+// The stats window exists only while it's open (~200 MB and a renderer otherwise). Events for it (open settings, open a
+// song) wait here until the page has loaded and asks for them.
+static STATS_READY: AtomicBool = AtomicBool::new(false);
+static STATS_OPENING: AtomicBool = AtomicBool::new(false);
+static STATS_PENDING: Mutex<Vec<(String, serde_json::Value)>> = Mutex::new(Vec::new());
+
+fn show_stats(app: &AppHandle, event: Option<(&str, serde_json::Value)>) {
+    if let Some(w) = app.get_webview_window("stats") {
+        let _ = (w.show(), w.unminimize(), w.set_focus());
+    }
+    if let Some((name, payload)) = event {
+        if STATS_READY.load(Relaxed) {
+            let _ = app.emit_to("stats", name, payload);
+        } else {
+            STATS_PENDING.lock().unwrap().push((name.into(), payload));
+        }
+    }
+    if app.get_webview_window("stats").is_some() || STATS_OPENING.swap(true, Relaxed) {
+        return;
+    }
+    // Built off the main thread: building a window from a sync command or a menu handler deadlocks on Windows.
+    let app = app.clone();
+    thread::spawn(move || {
+        let cfg = app.config().app.windows.iter().find(|w| w.label == "stats").cloned();
+        if let Some(w) = cfg.and_then(|c| WebviewWindowBuilder::from_config(&app, &c).ok()).and_then(|b| b.build().ok()) {
+            w.on_window_event(|e| {
+                if let WindowEvent::Destroyed = e {
+                    STATS_READY.store(false, Relaxed);
+                }
+            });
+            let _ = (w.show(), w.set_focus());
+        }
+        STATS_OPENING.store(false, Relaxed);
+    });
+}
+
 #[tauri::command]
-fn open_stats(app: AppHandle) {
-    let w = app.get_webview_window("stats").unwrap();
-    let _ = (w.show(), w.unminimize(), w.set_focus());
+fn open_stats(app: AppHandle, detail: Option<serde_json::Value>) {
+    show_stats(&app, detail.map(|d| ("open-detail", d)));
+}
+
+/// The stats page, once loaded: what it was opened for.
+#[tauri::command]
+fn stats_ready() -> Vec<(String, serde_json::Value)> {
+    STATS_READY.store(true, Relaxed);
+    std::mem::take(&mut *STATS_PENDING.lock().unwrap())
 }
 
 fn make(app: &AppHandle, label: &str, w: f64, h: f64, x: f64, y: f64) -> tauri::Result<()> {
     let title = if label == "widget" { "Wavelog Widget".into() } else { format!("Wavelog {label}") };
     let win = base(app, label, title, w, h).position(x, y).visible(shown(label)).build()?;
     no_activate(&win);
+    webview_shown(&win, shown(label));
     let h = win.hwnd().map_or(0, |h| h.0 as isize);
     let _ = app.run_on_main_thread(move || unsafe {
         windows_sys::Win32::UI::Shell::SetWindowSubclass(h as _, Some(keep_layer), 1, 0);
@@ -1331,6 +1425,39 @@ fn make(app: &AppHandle, label: &str, w: f64, h: f64, x: f64, y: f64) -> tauri::
     Ok(())
 }
 
+/// Widgets, notch and plugin overlays from the logger's settings. The stats page used to do this while it sat hidden
+/// in the background; now it's closed most of the time. At start, then every 20 s in case a plugin starts or stops
+/// (the stats page still applies changes made in Settings right away).
+fn apply_settings(app: &AppHandle) {
+    let mut last = String::new();
+    loop {
+        if let (Some(s), Some(p)) = (http_get("/settings"), http_get("/plugins")) {
+            let running: Vec<&serde_json::Value> = p["plugins"].as_array().map(|a| a.iter().filter(|x| x["enabled"] == true && x["error"].is_null()).collect()).unwrap_or_default();
+            let str_of = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_string();
+            let slots: Vec<String> = running.iter().flat_map(|x| x["widgets"].as_array().cloned().unwrap_or_default().into_iter().map(move |w| format!("p_{}_{}", str_of(&x["id"]), str_of(&w["id"])))).collect();
+            let list: Vec<(String, String)> = s["widgets"].as_array().cloned().unwrap_or_default().iter().map(|w| str_of(w))
+                .filter(|w| !w.starts_with("p_") || slots.contains(w))
+                .map(|w| { let size = s["sizes"][&w].as_str().unwrap_or("m").to_string(); (w, size) }).collect();
+            let overlay: Vec<String> = s["overlay"].as_array().map(|a| a.iter().map(|x| str_of(x)).collect()).unwrap_or_default();
+            let overlays: Vec<(String, String, String, f64, f64, f64)> = running.iter().flat_map(|x| x["overlays"].as_array().cloned().unwrap_or_default().into_iter().map(move |o| (
+                format!("po_{}_{}", str_of(&x["id"]), str_of(&o["id"])), str_of(&o["game"]), str_of(&o["key"]),
+                o["w"].as_f64().unwrap_or(400.0), o["h"].as_f64().unwrap_or(200.0), o["y"].as_f64().unwrap_or(0.7))))
+                .collect();
+            let scale = s["scale"].as_f64().unwrap_or(1.0);
+            let key = serde_json::to_string(&(&list, scale, &overlay, &overlays)).unwrap_or_default();
+            if key != last {
+                last = key;
+                let _ = tauri::async_runtime::block_on(set_widgets(app.clone(), list, Some(scale), Some(overlay)));
+                set_overlays(app.clone(), overlays);
+                sync(app);
+            }
+            thread::sleep(Duration::from_secs(20));
+        } else {
+            thread::sleep(Duration::from_secs(2)); // the logger is still starting
+        }
+    }
+}
+
 #[tauri::command]
 async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<f64>, overlay: Option<Vec<String>>) -> Result<(), String> {
     // The stats page calls this twice at startup. Without the lock both calls see no window yet,
@@ -1348,6 +1475,7 @@ async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<
         (None, true) => {
             let w = base(&app, "notch", "Wavelog notch".into(), NOTCH_SIZE.0, NOTCH_SIZE.1).always_on_top(true).visible(shown("notch")).build().map_err(|e| e.to_string())?;
             no_activate(&w);
+            webview_shown(&w, shown("notch"));
             NOTCH_IN.store(false, Relaxed);
             NOTCH_SHOWN.store(true, Relaxed);
             let _ = w.set_ignore_cursor_events(true);
@@ -1514,6 +1642,7 @@ fn plugin_overlays(app: &AppHandle) {
                     let _ = w.set_ignore_cursor_events(true);
                     no_activate(&w);
                     let _ = w.hide();
+                    webview_shown(&w, false);
                 }
             }
         }
@@ -1527,8 +1656,10 @@ fn plugin_overlays(app: &AppHandle) {
                 if let Ok(h) = w.hwnd() {
                     unsafe { ShowWindow(h.0 as _, SW_HIDE) };
                 }
+                webview_shown(&w, false);
             }
             if let Some(w) = down.as_ref().and_then(|l| app.get_webview_window(l)) {
+                webview_shown(&w, true);
                 let _ = app.emit_to(w.label(), "visibility", true);
                 if let Ok(h) = w.hwnd() {
                     place(h.0 as _, y);
@@ -1544,6 +1675,7 @@ fn plugin_overlays(app: &AppHandle) {
                     if let Ok(h) = w.hwnd() {
                         if unsafe { IsWindowVisible(h.0 as _) } != 0 {
                             unsafe { ShowWindow(h.0 as _, SW_HIDE) };
+                            webview_shown(&w, false);
                         }
                     }
                 }
@@ -1602,7 +1734,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if !args.iter().any(|a| a == "--autostart") {
-                open_stats(app.clone());
+                show_stats(app, None);
             }
         }))
         .plugin(
@@ -1612,7 +1744,7 @@ fn main() {
                 .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![open_stats, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness, set_overlays])
+        .invoke_handler(tauri::generate_handler![open_stats, stats_ready, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness, set_overlays])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
             let _ = APP.set(app.handle().clone());
@@ -1621,14 +1753,8 @@ fn main() {
                 SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, std::ptr::null_mut(), Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
             }
             start_backend();
-            let stats = app.get_webview_window("stats").unwrap();
-            let s = stats.clone();
-            stats.on_window_event(move |e| {
-                if let WindowEvent::CloseRequested { api, .. } = e {
-                    api.prevent_close();
-                    let _ = s.hide();
-                }
-            });
+            let handle = app.handle().clone();
+            guarded("windows", move || apply_settings(&handle));
 
             let menu = Menu::with_items(app, &[
                 &MenuItem::with_id(app, "toggle", "Show or hide widgets", true, Some("ctrl+alt+s"))?,
@@ -1642,11 +1768,8 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "toggle" => toggle(app),
-                    "stats" => open_stats(app.clone()),
-                    "settings" => {
-                        open_stats(app.clone());
-                        let _ = app.emit_to("stats", "open-settings", ());
-                    }
+                    "stats" => show_stats(app, None),
+                    "settings" => show_stats(app, Some(("open-settings", serde_json::Value::Null))),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -1677,11 +1800,15 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to start")
         .run(|_, e| {
+            // Closing the stats window (or the last window) isn't quitting: Wavelog lives in the tray.
+            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &e {
+                api.prevent_exit();
+            }
             if let tauri::RunEvent::Exit = e {
                 if let Some(mut c) = BACKEND.lock().unwrap().take() {
                     let _ = c.kill();
                 }
-                if let Some(base) = DUCK_BASE.lock().unwrap().take() {
+                if let Some(base) = take_duck_base() {
                     set_spotify(&spotify_sessions(), base); // don't leave Spotify quiet when Wavelog quits mid-dip
                 }
             }

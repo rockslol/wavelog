@@ -2124,9 +2124,11 @@ kbd {
 }
 .eq s {
   width: 3px;
-  height: 4px;
+  height: 14px;
   border-radius: 1px;
   background: #1ed760;
+  transform: scaleY(0.29);
+  transform-origin: bottom;
 }
 .eq.on s {
   animation: eq 0.9s ease-in-out infinite alternate;
@@ -2137,8 +2139,9 @@ kbd {
 .eq.on s:nth-child(3) {
   animation-delay: -0.6s;
 }
+/* transform, not height: a height animation re-lays out the page every frame */
 @keyframes eq {
-  to { height: 14px; }
+  to { transform: scaleY(1); }
 }
 
 .notch {
@@ -2307,10 +2310,11 @@ kbd {
 }
 .viz s {
   width: 3px;
-  height: 20%;
+  height: 100%;
   border-radius: 2px;
   background: var(--eq);
-  transition: height 0.09s linear;
+  transform: scaleY(0.2);
+  transition: transform 0.09s linear;
 }
 .viz.on:not(.live) s {
   animation: viz 0.9s ease-in-out infinite alternate;
@@ -2320,7 +2324,7 @@ kbd {
 .viz s:nth-child(4) { animation-delay: -0.15s; }
 .viz s:nth-child(5) { animation-delay: -0.45s; }
 @keyframes viz {
-  to { height: 100%; }
+  to { transform: scaleY(1); }
 }
 .n-full .viz, .n-peek .viz {
   height: 22px;

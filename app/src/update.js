@@ -53,6 +53,6 @@ let started = false;
 export function startUpdateChecks() {
   if (started) return;
   started = true;
-  setTimeout(checkForUpdate, 20000);
+  setTimeout(checkForUpdate, 3000); // the stats window only exists while open, so check soon after it opens
   setInterval(checkForUpdate, 6 * 3600 * 1000);
 }

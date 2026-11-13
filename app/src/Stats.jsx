@@ -1108,10 +1108,6 @@ function applyWidgets(s) {
   // Plugin widgets only while their plugin runs (until the list has loaded, keep them as they are).
   const pl = pluginList(), ok = pl && new Set(pluginWidgets(pl).map(([id]) => id));
   const list = s.widgets.filter((w) => !w.startsWith("p_") || !ok || ok.has(w)).map((w) => [w, s.sizes?.[w] || "m"]);
-  try {
-    localStorage.setItem("widgets", JSON.stringify(list));
-    localStorage.setItem("scale", String(s.scale ?? 1));
-  } catch {}
   return invoke("set_widgets", { list, scale: s.scale ?? 1, overlay: s.overlay || [] });
 }
 
@@ -1807,17 +1803,12 @@ export default function Stats() {
   const [detail, setDetail] = useState(hash[1] ? { kind: hash[0], id: hash[1] } : null);
   const setTab = (t) => (setDetail(null), setTabRaw(t));
   useEffect(() => {
-    let list = [["widget", "m"]];
-    try {
-      list = (JSON.parse(localStorage.getItem("widgets")) || list).map((w) => (Array.isArray(w) ? w : [w, "m"]));
-    } catch {}
-    invoke("set_widgets", { list, scale: +localStorage.getItem("scale") || 1 });
+    // This window exists only while it's open (the app keeps the widgets going without it).
     startUpdateChecks();
-    let stop = false;
-    const sync = () => get("/settings").then(applyWidgets).catch(() => !stop && setTimeout(sync, 5000));
-    sync();
-    const offs = [listen("open-settings", () => setTab("settings")), listen("open-detail", (e) => (setDetail(e.payload), window.scrollTo(0, 0)))];
-    return () => ((stop = true), offs.forEach((o) => o.then((f) => f())));
+    const on = (name, payload) => (name === "open-settings" ? setTab("settings") : name === "open-detail" && (setDetail(payload), window.scrollTo(0, 0)));
+    const offs = [listen("open-settings", () => on("open-settings")), listen("open-detail", (e) => on("open-detail", e.payload))];
+    Promise.all(offs).then(() => invoke("stats_ready")).then((list) => list.forEach(([name, payload]) => on(name, payload))).catch(() => {});
+    return () => offs.forEach((o) => o.then((f) => f()));
   }, []);
   const plug = usePlugins();
   const plugKey = JSON.stringify([pluginWidgets(plug).map(([id]) => id), pluginOverlays(plug)]);

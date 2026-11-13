@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "stats",
+        "create": false,
         "title": "Wavelog",
         "width": 1100,
         "height": 760,

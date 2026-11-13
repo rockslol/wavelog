@@ -16,6 +16,7 @@ tauri-plugin-process = "2"
 serde_json = "1"
 windows = { version = "0.62", features = ["Foundation", "Media_Control", "Storage_Streams", "Win32_Devices_FunctionDiscovery", "Win32_Media_Audio_Endpoints", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem"] }
 windows-core = "0.62"
+webview2-com = "0.39"
 windows-sys = { version = "0.59", features = ["Win32_Devices_Display", "Win32_System_LibraryLoader", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]

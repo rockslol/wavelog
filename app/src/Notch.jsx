@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, emitTo, listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { pimg, PluginSection, pluginSections, usePlugins } from "./Plugins";
@@ -549,11 +549,11 @@ export default function Notch() {
     const b = e.currentTarget.getBoundingClientRect();
     setVolume({ set: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)) });
   };
-  const openStats = () => (invoke("open_stats"), has && !now.other && emitTo("stats", "open-detail", { kind: "track", id: now.id }));
+  const openStats = () => invoke("open_stats", { detail: has && !now.other ? { kind: "track", id: now.id } : null });
 
   const viz = (n) => o.viz && (
     <i className={"viz" + (playing ? " on" : "") + (live ? " live" : "")}>
-      {WOBBLE.slice(0, n).map((_, i) => <s key={i} style={live && playing ? { height: `calc(var(--b${i}, 0.2) * 100%)` } : null} />)}
+      {WOBBLE.slice(0, n).map((_, i) => <s key={i} style={live && playing ? { transform: `scaleY(var(--b${i}, 0.2))` } : null} />)}
     </i>
   );
   const cover = (cls) => (now?.image ? <img className={cls} src={now.image} draggable={false} /> : <div className={cls} />);
