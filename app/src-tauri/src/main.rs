@@ -653,8 +653,17 @@ fn ducker() {
                 clear_since = None;
                 if let Some(t) = set_to {
                     if (cur - t).abs() > 0.03 {
-                        (set_to, overridden) = (None, true);
-                        *DUCK_BASE.lock().unwrap() = None;
+                        // Back at the volume from before the dip: Spotify put it back itself (a new song does that).
+                        // Dip again. Anywhere else: the user moved it, leave it alone.
+                        let base = *DUCK_BASE.lock().unwrap();
+                        if base.is_some_and(|b| (cur - b).abs() <= 0.03) {
+                            let target = cur * cfg.level;
+                            fade(&sessions, cur, target);
+                            set_to = Some(target);
+                        } else {
+                            (set_to, overridden) = (None, true);
+                            *DUCK_BASE.lock().unwrap() = None;
+                        }
                     }
                 } else if !overridden {
                     let target = cur * cfg.level;
@@ -1504,6 +1513,7 @@ fn plugin_overlays(app: &AppHandle) {
                 if let Ok(w) = base(app, &o.0, "Wavelog plugin overlay".into(), o.3, o.4).always_on_top(true).visible(false).build() {
                     let _ = w.set_ignore_cursor_events(true);
                     no_activate(&w);
+                    let _ = w.hide();
                 }
             }
         }
@@ -1512,7 +1522,11 @@ fn plugin_overlays(app: &AppHandle) {
         if down != showing {
             if let Some(w) = showing.as_ref().and_then(|l| app.get_webview_window(l)) {
                 let _ = app.emit_to(w.label(), "visibility", false);
-                let _ = w.hide();
+                // Raw Win32 like the show below: tao never saw that show, so its own hide() thinks the window is
+                // already hidden and does nothing (that left the Tab panel stuck on screen).
+                if let Ok(h) = w.hwnd() {
+                    unsafe { ShowWindow(h.0 as _, SW_HIDE) };
+                }
             }
             if let Some(w) = down.as_ref().and_then(|l| app.get_webview_window(l)) {
                 let _ = app.emit_to(w.label(), "visibility", true);
@@ -1521,10 +1535,42 @@ fn plugin_overlays(app: &AppHandle) {
                     unsafe { ShowWindow(h.0 as _, SW_SHOWNOACTIVATE) };
                 }
             }
-            showing = down;
+            showing = down.clone();
+        }
+        // Whatever state the loop thinks it is in, an overlay whose key isn't held must not be on screen.
+        for o in &list {
+            if down.as_deref() != Some(o.0.as_str()) {
+                if let Some(w) = app.get_webview_window(&o.0) {
+                    if let Ok(h) = w.hwnd() {
+                        if unsafe { IsWindowVisible(h.0 as _) } != 0 {
+                            unsafe { ShowWindow(h.0 as _, SW_HIDE) };
+                        }
+                    }
+                }
+            }
         }
         thread::sleep(Duration::from_millis(if active.is_empty() { 400 } else { 30 }));
     }
+}
+
+fn applog(msg: &str) {
+    use std::io::Write;
+    if let Some(dir) = std::env::var_os("APPDATA") {
+        if let Ok(mut l) = std::fs::OpenOptions::new().append(true).open(std::path::Path::new(&dir).join("Wavelog").join("app.log")) {
+            let _ = writeln!(l, "wavelog.exe: {msg}");
+        }
+    }
+}
+
+/// Runs a background loop again if it panics, and writes why to the app log (a dead thread used to fail silently).
+fn guarded<F: Fn() + Send + 'static>(name: &'static str, f: F) {
+    thread::spawn(move || loop {
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(&f)) {
+            let why = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+            applog(&format!("thread {name} crashed and restarted: {why}"));
+        }
+        thread::sleep(Duration::from_secs(2));
+    });
 }
 
 fn fullscreen_foreground() -> bool {
@@ -1607,7 +1653,7 @@ fn main() {
                 .build(app)?;
 
             let handle = app.handle().clone();
-            thread::spawn(move || plugin_overlays(&handle));
+            guarded("overlays", move || plugin_overlays(&handle));
             let handle = app.handle().clone();
             thread::spawn(move || notch_hover(&handle));
             let handle = app.handle().clone();
@@ -1616,7 +1662,7 @@ fn main() {
             thread::spawn(move || viz_audio(&handle));
             thread::spawn(volume_keys);
             thread::spawn(camera_watch);
-            thread::spawn(ducker);
+            guarded("ducker", ducker);
             let handle = app.handle().clone();
             thread::spawn(move || loop {
                 let f = fullscreen_foreground();
