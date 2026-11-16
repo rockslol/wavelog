@@ -212,16 +212,30 @@ fn base<'a>(app: &'a AppHandle, label: &str, title: String, w: f64, h: f64) -> W
         .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --renderer-process-limit=1")
 }
 
-fn place_notch(w: &tauri::WebviewWindow) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    // The screen picked in Settings > Notch, or the main one.
+/// Where the notch belongs: top middle of the screen picked in Settings > Notch (or the main one), in physical pixels.
+fn notch_rect(w: &tauri::WebviewWindow) -> Option<(i32, i32, i32, i32)> {
     let want = NOTCH_MONITOR.lock().unwrap().clone();
     let picked = w.available_monitors().unwrap_or_default().into_iter().find(|m| !want.is_empty() && m.name().is_some_and(|n| *n == want));
-    let (Some(m), Ok(h)) = (picked.or(w.primary_monitor().ok().flatten()), w.hwnd()) else { return };
+    let m = picked.or(w.primary_monitor().ok().flatten())?;
     let k = m.scale_factor();
     let (pw, ph) = ((NOTCH_SIZE.0 * k) as i32, (NOTCH_SIZE.1 * k) as i32);
-    let (x, y) = (m.position().x + (m.size().width as i32 - pw) / 2, m.position().y);
+    Some((m.position().x + (m.size().width as i32 - pw) / 2, m.position().y, pw, ph))
+}
+
+fn place_notch(w: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let (Some((x, y, pw, ph)), Ok(h)) = (notch_rect(w), w.hwnd()) else { return };
     unsafe { SetWindowPos(h.0 as _, HWND_TOPMOST, x, y, pw, ph, SWP_NOACTIVATE) };
+}
+
+/// A resolution, scaling or screen change moves and resizes the notch (Windows shifts windows to fit the new layout,
+/// and a DPI change resizes them). Checked every second: if it isn't where it belongs, put it back.
+fn notch_in_place(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("notch") else { return };
+    let (Some((x, y, pw, ph)), Ok(p), Ok(s)) = (notch_rect(&w), w.outer_position(), w.outer_size()) else { return };
+    if (p.x, p.y, s.width as i32, s.height as i32) != (x, y, pw, ph) {
+        place_notch(&w);
+    }
 }
 
 static NOTCH_AUTOHIDE: AtomicBool = AtomicBool::new(false);
@@ -1793,6 +1807,7 @@ fn main() {
                     sync(&handle);
                 }
                 notch_on_top(&handle);
+                notch_in_place(&handle);
                 thread::sleep(Duration::from_secs(1));
             });
             Ok(())
