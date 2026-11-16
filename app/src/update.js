@@ -17,10 +17,10 @@ export async function checkForUpdate() {
     const u = await check();
     set({ state: u ? "available" : "latest", update: u, checked: Date.now() });
   } catch (e) {
+    // Offline or GitHub unreachable looks like this too, so it's never reported as "you're on the latest version".
     const msg = String(e?.message || e);
-    // Before the first GitHub release there is no latest.json yet; that's not an error worth shouting about.
-    const none = /404|valid release JSON|Could not fetch|not found/i.test(msg);
-    set({ state: none ? "latest" : "error", error: none ? null : msg, checked: Date.now() });
+    const net = /valid release JSON|Could not fetch|error sending request|dns|timed? ?out|connect/i.test(msg);
+    set({ state: "error", error: net ? "couldn't reach GitHub. Check your internet connection" : msg, checked: Date.now() });
   }
 }
 

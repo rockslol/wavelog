@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import time
 from collections import deque
@@ -7,7 +8,7 @@ from datetime import datetime
 import httpx
 
 import spotify
-from db import db, save_track, ts
+from db import DATA, db, read_json, save_track, ts
 
 log = logging.getLogger("poller")
 skips = deque(maxlen=200)
@@ -17,6 +18,7 @@ lock = asyncio.Lock()
 
 def finish(s, ended):
     t = s["track"]
+    ended = min(ended, s.get("stop", ended))  # a play carried over a restart can't have gone on past the shutdown
     if s["playing"]:
         ms = min(t["duration_ms"], s["progress"] + max(0, ended - s["poll"]) * 1000)
         end = s["poll"] + (ms - s["progress"]) / 1000
@@ -65,6 +67,7 @@ async def read_current():
         if not cur:
             cur = dict(track=item, start=now - progress / 1000, playing_at=now,
                        context=(d.get("context") or {}).get("uri"))
+        cur.pop("stop", None)
         cur.update(progress=progress, poll=now, playing=d.get("is_playing", False))
         if cur["playing"]:
             cur["playing_at"] = now
@@ -107,8 +110,29 @@ async def fill_missing():
             log.warning("Track %s lookup failed (%s), skipping", row[0], e.response.status_code)
             db.execute("UPDATE tracks SET album_id='' WHERE id=?", row)
     elif row := db.execute("SELECT id FROM artists WHERE image_url IS NULL LIMIT 1").fetchone():
-        a = await spotify.get(f"/artists/{row[0]}")
+        try:
+            a = await spotify.get(f"/artists/{row[0]}")
+        except httpx.HTTPStatusError as e:
+            log.warning("Artist %s lookup failed (%s), skipping", row[0], e.response.status_code)
+            a = {}
         db.execute("UPDATE artists SET image_url=? WHERE id=?", ((a.get("images") or [{}])[0].get("url", ""), row[0]))
+
+
+# The song playing when the logger stops is kept here, so it still counts after a restart or an update.
+CURRENT = DATA / "current.json"
+
+
+def save_current():
+    if cur:
+        CURRENT.write_text(json.dumps(cur | {"stop": time.time()}), "utf-8")
+
+
+def load_current():
+    global cur
+    c = read_json(CURRENT, None)
+    CURRENT.unlink(missing_ok=True)
+    if c and time.time() - c.get("stop", 0) < 6 * 3600:
+        cur = c
 
 
 health = {}  # background job -> last run, last success, last error (shown in Settings > Advanced)
@@ -124,6 +148,8 @@ async def loop(fn, every):
             h.update(last_ok=time.time(), error=None)
         except Exception as e:
             h["fails"] += 1
-            h["error"] = f"{type(e).__name__}: {e}"[:300]
-            log.exception("%s failed", fn.__name__)
+            err = f"{type(e).__name__}: {e}"[:300]
+            if err != h["error"]:  # the same error again (Spotify down for an hour) is logged once, not every few seconds
+                log.exception("%s failed", fn.__name__)
+            h["error"] = err
         await asyncio.sleep(every() if callable(every) else every)

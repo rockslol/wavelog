@@ -1,4 +1,5 @@
 import asyncio
+import ctypes
 import hashlib
 import io
 import json
@@ -21,11 +22,11 @@ from PIL import Image, ImageOps
 
 import poller
 import spotify
-from db import DATA, db
+from db import DATA, db, read_json, write_json
 
 log = logging.getLogger("widgets")
 router = APIRouter()
-http = httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent": "sp-stats (local listening stats app)"})
+http = httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent": "Wavelog (local listening stats app)"})
 FILE = DATA / "settings.json"
 CACHE = DATA / "photo-cache"
 CACHE.mkdir(exist_ok=True)
@@ -36,13 +37,14 @@ DEFAULTS = {"widgets": ["widget"], "sizes": {}, "scale": 1.0, "tint": 0.4, "lock
             "overlay": [], "notch": {}, "lastfm_user": "", "lastfm_key": "", "steam_key": "", "steam_id": ""}
 # Settings from before 0.10.0 (valorant, tab_y, val_wishlist) stay in the file: plugins.py reads them once when Valorant
 # moves into its plugin.
-settings = {**DEFAULTS, **(json.loads(FILE.read_text()) if FILE.exists() else {})}
+settings = {**DEFAULTS, **read_json(FILE, {})}
 cache = {}
 db.execute("CREATE TABLE IF NOT EXISTS lyrics (track_id TEXT PRIMARY KEY, synced TEXT, plain TEXT)")
-try:
-    db.execute("ALTER TABLE lyrics ADD COLUMN source TEXT")
-except sqlite3.OperationalError:
-    pass
+for col in ("source TEXT", "checked INTEGER"):  # checked: when "no lyrics" was last confirmed, to look again later
+    try:
+        db.execute(f"ALTER TABLE lyrics ADD COLUMN {col}")
+    except sqlite3.OperationalError:
+        pass
 CREDIT = re.compile(r"^[^:：]{0,12}[㐀-鿿][^:：]{0,12}[:：]")
 NETEASE = {"User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com"}
 
@@ -77,15 +79,26 @@ async def put_settings(new: dict = Body(...)):
     if new.get("client_id", "").strip() and new["client_id"].strip() != spotify.cfg.get("client_id"):
         spotify.set_client_id(new["client_id"])
     new = {k: v for k, v in new.items() if k in DEFAULTS}
-    if new.get("city", settings["city"]) != settings["city"] or (new.get("city") and settings["lat"] is None):
-        r = (await http.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": new["city"], "count": 1})).json()
-        if not r.get("results"):
-            raise HTTPException(400, f"City not found: {new['city']}")
-        g = r["results"][0]
-        new |= {"lat": g["latitude"], "lon": g["longitude"], "place": g["name"]}
-    for k in ("lastfm_user", "lastfm_key"):
+    # The Settings page sends everything on each change, so a city, key or ID that doesn't check out keeps its old value
+    # and only that is reported (as `warning`): the rest still saves.
+    warning = None
+    for k in ("city", "lastfm_user", "lastfm_key", "steam_key", "steam_id"):
         if k in new:
-            new[k] = (new[k] or "").strip()
+            new[k] = str(new[k] or "").strip()
+    city = new.get("city", settings["city"])
+    if not city:
+        new |= {"city": "", "lat": None, "lon": None, "place": ""}
+    elif city != settings["city"] or settings["lat"] is None:
+        try:
+            r = await http.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1})
+            hit = (r.json().get("results") or [None])[0]
+        except (httpx.HTTPError, ValueError):
+            hit, warning = None, "Couldn't reach the weather service, so the city wasn't changed"
+        if hit:
+            new |= {"lat": hit["latitude"], "lon": hit["longitude"], "place": hit["name"]}
+        else:
+            new["city"] = settings["city"]
+            warning = warning or f"City not found: {city}"
     lf = (new.get("lastfm_user", settings["lastfm_user"]), new.get("lastfm_key", settings["lastfm_key"]))
     lf_changed = lf != (settings["lastfm_user"], settings["lastfm_key"]) and all(lf)
     if lf_changed:
@@ -93,26 +106,24 @@ async def put_settings(new: dict = Body(...)):
         try:
             await lastfm.check(*lf)
         except lastfm.LastfmError as e:
-            raise HTTPException(400, f"Last.fm: {e}")
-    for k in ("steam_key", "steam_id"):
-        if k in new:
-            new[k] = (new[k] or "").strip()
+            new |= {"lastfm_user": settings["lastfm_user"], "lastfm_key": settings["lastfm_key"]}
+            lf_changed, warning = False, f"Last.fm: {e}"
     st = (new.get("steam_key", settings["steam_key"]), new.get("steam_id", settings["steam_id"]))
     if st != (settings["steam_key"], settings["steam_id"]) and st[0]:
         import steam
         try:
             await steam.check(st[0], st[1] or steam.detect_id())
-        except steam.SteamError as e:
-            raise HTTPException(400, "Steam doesn't accept this API key" if str(e) == "key" else "Steam profile not found, check the SteamID")
-        except Exception:
-            raise HTTPException(400, "Couldn't reach Steam, try again")
-        steam.forget()
+            steam.forget()
+        except Exception as e:
+            new |= {"steam_key": settings["steam_key"], "steam_id": settings["steam_id"]}
+            warning = ("Couldn't reach Steam, try again" if not isinstance(e, steam.SteamError)
+                       else "Steam doesn't accept this API key" if str(e) == "key" else "Steam profile not found, check the SteamID")
     settings.update(new)
-    FILE.write_text(json.dumps(settings, indent=2))
+    write_json(FILE, settings, 2)
     if lf_changed:
         lastfm.start()
     cache.clear()
-    return await get_settings()
+    return await get_settings() | ({"warning": warning} if warning else {})
 
 
 def parse_lrc(text):
@@ -127,10 +138,12 @@ def parse_lrc(text):
 async def lrclib(name, artist, album, secs):
     q = {"track_name": name, "artist_name": artist}
     r = await http.get("https://lrclib.net/api/get", params=q | {"album_name": album or "", "duration": secs})
+    if r.status_code != 404:
+        r.raise_for_status()
     hit = r.json() if r.status_code == 200 else {}
     if not hit.get("syncedLyrics"):
-        r = await http.get("https://lrclib.net/api/search", params=q)
-        found = r.json() if r.status_code == 200 and isinstance(r.json(), list) else []
+        r = (await http.get("https://lrclib.net/api/search", params=q)).raise_for_status()
+        found = r.json() if isinstance(r.json(), list) else []
         hit = next((x for x in found if x.get("syncedLyrics")), hit or (found[0] if found else {}))
     return hit.get("syncedLyrics") or "", hit.get("plainLyrics") or ""
 
@@ -149,21 +162,27 @@ async def netease(name, artist, secs):
 
 async def ovh(name, artist):
     r = await http.get(f"https://api.lyrics.ovh/v1/{quote(artist)}/{quote(name)}", timeout=10)
+    if r.status_code != 404:
+        r.raise_for_status()
     return (r.json().get("lyrics") or "").strip() if r.status_code == 200 else ""
 
 
-async def safe(coro, default):
+async def safe(coro, default, failed):
     try:
         return await coro
-    except Exception:
-        log.exception("lyrics source failed")
+    except Exception as e:
+        log.warning("Lyrics source failed: %s: %s", type(e).__name__, e)
+        failed.append(e)
         return default
+
+
+RECHECK = 14 * 86400  # songs with no lyrics anywhere are looked up again after two weeks
 
 
 @router.get("/lyrics")
 async def lyrics(id: str):
-    row = db.execute("SELECT synced, plain, source FROM lyrics WHERE track_id=?", (id,)).fetchone()
-    if not row or (not row[0] and row[2] is None):
+    row = db.execute("SELECT synced, plain, source, checked FROM lyrics WHERE track_id=?", (id,)).fetchone()
+    if not row or (not row[0] and (row[2] is None or (not row[1] and not row[2] and (row[3] or 0) < time.time() - RECHECK))):
         t = db.execute("SELECT t.name, al.name, t.duration_ms, (SELECT ar.name FROM track_artists ta JOIN artists ar "
                        "ON ar.id = ta.artist_id WHERE ta.track_id = t.id ORDER BY ta.position LIMIT 1) "
                        "FROM tracks t LEFT JOIN albums al ON al.id = t.album_id WHERE t.id=?", (id,)).fetchone()
@@ -174,14 +193,16 @@ async def lyrics(id: str):
             raise HTTPException(404, "Unknown track")
         name, album, ms, artist = t
         secs = round((ms or 0) / 1000)
-        synced, plain = await safe(lrclib(name, artist, album, secs), ("", ""))
+        failed = []
+        synced, plain = await safe(lrclib(name, artist, album, secs), ("", ""), failed)
         source = "lrclib" if synced or plain else ""
-        if not synced and (s := await safe(netease(name, artist, secs), "")):
+        if not synced and (s := await safe(netease(name, artist, secs), "", failed)):
             synced, source = s, "netease"
-        if not synced and not plain and (p := await safe(ovh(name, artist), "")):
+        if not synced and not plain and (p := await safe(ovh(name, artist), "", failed)):
             plain, source = p, "lyrics.ovh"
-        row = (synced, plain, source)
-        db.execute("INSERT OR REPLACE INTO lyrics (track_id, synced, plain, source) VALUES (?,?,?,?)", (id, *row))
+        # Nothing found because a source was down: don't remember that, ask again next time.
+        row = (synced, plain, None if failed and not (synced or plain) else source)
+        db.execute("INSERT OR REPLACE INTO lyrics (track_id, synced, plain, source, checked) VALUES (?,?,?,?,?)", (id, *row, int(time.time())))
     return {"id": id, "lines": parse_lrc(row[0]), "plain": row[1], "source": row[2]}
 
 
@@ -191,16 +212,16 @@ async def calendar():
     out = []
     for url in settings["calendars"]:
         url = re.sub(r"^webcal://", "https://", url.strip(), flags=re.I)
-        try:
+        try:  # one link that's down or isn't a calendar (a login page) only drops that calendar
             cal = icalendar.Calendar.from_ical(await cached(url, 900, lambda u=url: fetch(u)))
-        except HTTPException:
-            continue
-        name = str(cal.get("X-WR-CALNAME", ""))
-        for e in recurring_ical_events.of(cal).between(start, start + timedelta(days=14)):
-            s, end = e["DTSTART"].dt, e.get("DTEND", e["DTSTART"]).dt
-            day = not isinstance(s, datetime)
-            out.append({"title": str(e.get("SUMMARY", "")), "start": local(s).isoformat(), "end": local(end).isoformat(),
-                        "all_day": day, "calendar": name})
+            name = str(cal.get("X-WR-CALNAME", ""))
+            for e in recurring_ical_events.of(cal).between(start, start + timedelta(days=14)):
+                s, end = e["DTSTART"].dt, e.get("DTEND", e["DTSTART"]).dt
+                day = not isinstance(s, datetime)
+                out.append({"title": str(e.get("SUMMARY", "")), "start": local(s).isoformat(), "end": local(end).isoformat(),
+                            "all_day": day, "calendar": name})
+        except Exception as e:
+            log.warning("Calendar %s skipped: %s: %s", url[:60], type(e).__name__, e)
     return sorted(out, key=lambda e: e["start"])[:20]
 
 
@@ -238,31 +259,43 @@ async def icloud():
             return photos
 
 
+def photo_key(key):
+    return hashlib.sha1(key.encode()).hexdigest()
+
+
+def folder_photos(folder):
+    files = [p for p in folder.rglob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")][:5000]
+    return {photo_key(str(p)): p for p in files}
+
+
 async def photo_list():
+    """Photo key -> file path or download link. Photos are asked for by key, so a list that changed in between
+    (a refreshed album, a new file in the folder) never shows the wrong one."""
     if settings["album"]:
-        return await cached("album", 1800, icloud)
+        return await cached("album", 1800, lambda: icloud_map())
     folder = Path(settings["folder"]) if settings["folder"] else None
     if folder and folder.is_dir():
-        files = [p for p in folder.rglob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")][:5000]
-        return [(str(p), p) for p in files]
-    return []
+        return await cached(f"folder:{folder}", 300, lambda: asyncio.to_thread(folder_photos, folder))
+    return {}
+
+
+async def icloud_map():
+    return {photo_key(k): url for k, url in await icloud()}
 
 
 @router.get("/photos")
 async def photos():
-    items = await photo_list()
-    order = list(range(len(items)))
+    order = list(await photo_list())
     random.shuffle(order)
     return {"order": order, "seconds": settings["photo_seconds"]}
 
 
-@router.get("/photo/{i}")
-async def photo(i: int):
-    items = await photo_list()
-    if not 0 <= i < len(items):
+@router.get("/photo/{key}")
+async def photo(key: str):
+    src = (await photo_list()).get(key)
+    if not src:
         raise HTTPException(404)
-    key, src = items[i]
-    out = CACHE / (hashlib.sha1(key.encode()).hexdigest() + ".jpg")
+    out = CACHE / (key + ".jpg")
     if not out.exists():
         raw = src.read_bytes() if isinstance(src, Path) else await fetch(src)
 
@@ -301,6 +334,54 @@ async def weather():
     return await cached(f"weather{settings['lat']},{settings['lon']},{settings['fahrenheit']}", 900, load)
 
 
+class WinGpu:
+    """GPU use from Windows' own counters (the 3D graph in Task Manager), for AMD and Intel cards too. No temperature."""
+
+    class Item(ctypes.Structure):
+        _fields_ = [("name", ctypes.c_wchar_p), ("status", ctypes.c_uint32), ("pad", ctypes.c_uint32), ("value", ctypes.c_double)]
+
+    def __init__(self):
+        pdh = self.pdh = ctypes.windll.pdh
+        for f in ("PdhOpenQueryW", "PdhAddEnglishCounterW", "PdhCollectQueryData", "PdhGetFormattedCounterArrayW"):
+            getattr(pdh, f).restype = ctypes.c_uint32
+        pdh.PdhOpenQueryW.argtypes = [ctypes.c_wchar_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_void_p)]
+        pdh.PdhAddEnglishCounterW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_void_p)]
+        pdh.PdhCollectQueryData.argtypes = [ctypes.c_void_p]
+        pdh.PdhGetFormattedCounterArrayW.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+                                                     ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        self.q, self.c = ctypes.c_void_p(), ctypes.c_void_p()
+        path = "\\GPU Engine(*engtype_3D)\\Utilization Percentage"
+        if pdh.PdhOpenQueryW(None, 0, ctypes.byref(self.q)) or pdh.PdhAddEnglishCounterW(self.q, path, 0, ctypes.byref(self.c)):
+            raise OSError("no GPU counters")
+        pdh.PdhCollectQueryData(self.q)
+
+    def read(self):
+        size, count = ctypes.c_uint32(0), ctypes.c_uint32(0)
+        if self.pdh.PdhCollectQueryData(self.q):
+            return None
+        self.pdh.PdhGetFormattedCounterArrayW(self.c, 0x200, ctypes.byref(size), ctypes.byref(count), None)  # PDH_FMT_DOUBLE
+        if not size.value:
+            return 0
+        buf = ctypes.create_string_buffer(size.value)
+        if self.pdh.PdhGetFormattedCounterArrayW(self.c, 0x200, ctypes.byref(size), ctypes.byref(count), buf):
+            return None
+        items = ctypes.cast(buf, ctypes.POINTER(self.Item))
+        return min(100, round(sum(items[i].value for i in range(count.value) if items[i].status in (0, 1))))
+
+
+def find_gpu():
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        return "nvml", (pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
+    except Exception:
+        pass
+    try:
+        return "win", WinGpu()
+    except Exception:
+        return False
+
+
 gpu = None
 net = (time.time(), psutil.net_io_counters())
 
@@ -309,12 +390,7 @@ net = (time.time(), psutil.net_io_counters())
 async def system():
     global gpu, net
     if gpu is None:
-        try:
-            import pynvml
-            pynvml.nvmlInit()
-            gpu = (pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
-        except Exception:
-            gpu = False
+        gpu = find_gpu()
     now, io_ = time.time(), psutil.net_io_counters()
     dt = max(now - net[0], 0.5)
     down, up = (io_.bytes_recv - net[1].bytes_recv) / dt, (io_.bytes_sent - net[1].bytes_sent) / dt
@@ -322,7 +398,9 @@ async def system():
     ram = psutil.virtual_memory()
     out = {"cpu": psutil.cpu_percent(None), "ram": ram.percent, "ram_used": ram.used / 2**30, "ram_total": ram.total / 2**30,
            "down": down, "up": up, "gpu": None, "gpu_temp": None}
-    if gpu:
-        nv, h = gpu
+    if gpu and gpu[0] == "nvml":
+        nv, h = gpu[1]
         out |= {"gpu": nv.nvmlDeviceGetUtilizationRates(h).gpu, "gpu_temp": nv.nvmlDeviceGetTemperature(h, 0)}
+    elif gpu:
+        out["gpu"] = gpu[1].read()
     return out

@@ -14,7 +14,7 @@ from fastapi.responses import Response
 
 import notifs
 import widgets
-from db import DATA
+from db import DATA, write_json
 
 router = APIRouter(prefix="/shelf")
 FILE = DATA / "shelf.json"
@@ -30,7 +30,7 @@ def load():
 
 
 def save(items):
-    FILE.write_text(json.dumps(items, indent=2))
+    write_json(FILE, items, 2)
 
 
 def current():
@@ -93,8 +93,13 @@ async def clear():
 @router.get("/{item_id}/thumb")
 async def thumb(item_id: str):
     path = find(item_id)["path"]
-    key = (path, os.path.getmtime(path))
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        raise HTTPException(404)
     if key not in thumbs:
+        if len(thumbs) > 200:
+            thumbs.clear()
         thumbs[key] = await asyncio.get_running_loop().run_in_executor(notifs.shell, notifs.shell_image, path, 96, 0)
     if not thumbs[key]:
         raise HTTPException(404)

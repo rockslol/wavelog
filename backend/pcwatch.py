@@ -36,6 +36,7 @@ DOWNLOADS = known_folder("374DE290-123F-4565-9164-39C4925E467B") or Path.home() 
 SHOT_DIRS = list(dict.fromkeys(d for d in (
     known_folder("b7bede81-df94-4682-a7d8-57a52620b86f"),  # Pictures\Screenshots (Snipping Tool, Win+PrtSc)
     Path(os.environ["OneDrive"]) / "Pictures" / "Screenshots" if os.environ.get("OneDrive") else None,
+    (known_folder("18989B1D-99B5-455B-841C-AB7C74E4DDFC") or Path.home() / "Videos") / "Captures",  # Xbox Game Bar (Win+Alt+PrtSc)
 ) if d))
 
 
@@ -44,7 +45,8 @@ SHOT_DIRS = list(dict.fromkeys(d for d in (
 CONSENT = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 NAMES = {"discord": "Discord", "chrome": "Chrome", "msedge": "Edge", "brave": "Brave", "firefox": "Firefox", "opera": "Opera",
          "zoom": "Zoom", "ms-teams": "Teams", "teams": "Teams", "obs64": "OBS", "steam": "Steam", "steamwebhelper": "Steam",
-         "valorant-win64-shipping": "Valorant", "riotclientservices": "Riot Client", "whatsapp": "WhatsApp", "slack": "Slack", "medalencoder": "Medal"}
+         "valorant-win64-shipping": "Valorant", "riotclientservices": "Riot Client", "whatsapp": "WhatsApp", "slack": "Slack",
+         "medalencoder": "Medal", "medal": "Medal", "windowscamera": "Camera"}  # also sent to the notch for its own mic/camera list
 
 
 def app_name(key):
@@ -599,7 +601,7 @@ async def live(privacy: bool = True, dl: bool = True, shot: bool = True, battery
     import notifs
     return {"notifs": await notifs.recent() if notif else None, "mic": in_use("microphone") if privacy else [], "cam": in_use("webcam") if privacy else [],
             "downloads": downloads() if dl else None, "shot": screenshot() if shot else None,
-            "battery": await battery_list() if battery else [], "net": network() if net else None}
+            "battery": await battery_list() if battery else [], "net": network() if net else None, "names": NAMES}
 
 
 @router.get("/duck/state")

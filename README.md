@@ -37,7 +37,7 @@ Spotify apps in Development Mode only work for accounts you add to them in the d
 ### Fill in your history
 
 - **Last.fm**: Settings → General → Last.fm, enter your username and a free API key from <https://www.last.fm/api/account/create>. Every scrobble is matched to a Spotify song and added. Plays you already have are skipped. After that it syncs every 30 minutes.
-- **Spotify export**: request *Extended streaming history* at spotify.com → Account → Privacy settings (takes up to 30 days), then run `backend\import_history.py <export folder>` (see [Build from source](#build-from-source)).
+- **Spotify export**: request *Extended streaming history* at spotify.com → Account → Privacy settings (takes up to 30 days), then import it in **Settings → General → Import Spotify history**: paste where the .zip is (as it comes) or its folder.
 
 ## Troubleshooting
 
@@ -50,6 +50,7 @@ Files in `%APPDATA%\Wavelog` (`%APPDATA%\Spotify Stats` if you installed before 
 | `spotify.db` | SQLite database with your plays, tracks, artists and albums |
 | `settings.json` | Settings |
 | `config.json`, `tokens.json` | Spotify Client ID and sign-in. Keep these private |
+| `*.bad` | A settings file that couldn't be read (broken by a crash mid-write), kept for reference; Wavelog started that file fresh |
 | `app.log` | Log, rotates at 2 MB |
 | `backups/` | A copy of the database every day (last 14 kept) and manual backups |
 
@@ -61,10 +62,7 @@ Needs Windows, Python 3.12+, Node 20+, Rust and the Visual Studio C++ Build Tool
 # logger (Python)
 python -m venv backend\.venv
 backend\.venv\Scripts\pip install -r backend\requirements.txt pyinstaller
-backend\.venv\Scripts\python -m PyInstaller --noconfirm --onefile --noconsole --name wavelog-logger `
-  --add-data "backend\fonts;fonts" --collect-submodules uvicorn --collect-data recurring_ical_events backend\main.py
-mkdir app\src-tauri\binaries -Force
-copy dist\wavelog-logger.exe app\src-tauri\binaries\wavelog-logger-x86_64-pc-windows-msvc.exe
+backend\.venv\Scripts\python backend\build_logger.py   # builds wavelog-logger.exe and copies it to app\src-tauri\binaries
 
 # app (Tauri + React)
 cd app

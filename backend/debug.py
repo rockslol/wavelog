@@ -99,5 +99,6 @@ async def clear_cache():
 async def shutdown():
     """Used by Restart logger: the app starts a fresh one once this process is gone."""
     log.info("Shutting down for a restart")
+    poller.save_current()
     asyncio.get_running_loop().call_later(0.3, os._exit, 0)
     return {"ok": True}

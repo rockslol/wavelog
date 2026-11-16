@@ -1,29 +1,78 @@
 import asyncio
 import io
+import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 import api
+from pcwatch import DOWNLOADS
 from widgets import http
 
 router = APIRouter()
 FONTS = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "fonts"
+SYSTEM = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+# The bundled Inter only has Latin letters (no ő or ű, no Cyrillic, Greek, Chinese, Japanese, Korean). Anything it
+# lacks is drawn with Windows' own fonts, in this order.
+FALLBACK = {False: ["segoeui.ttf", "msyh.ttc", "YuGothM.ttc", "malgun.ttf", "Nirmala.ttf", "seguisym.ttf"],
+            True: ["seguisb.ttf", "msyhbd.ttc", "YuGothB.ttc", "malgunbd.ttf", "NirmalaB.ttf", "seguisym.ttf"]}
 W, H = 1080, 1350
 
 
-def font(size, bold=False):
-    return ImageFont.truetype(str(FONTS / f"inter-latin-{600 if bold else 400}-normal.woff"), size)
+@lru_cache
+def fonts(size, bold=False):
+    chain = [ImageFont.truetype(str(FONTS / f"inter-latin-{600 if bold else 400}-normal.woff"), size)]
+    return chain + [ImageFont.truetype(str(SYSTEM / f), size) for f in FALLBACK[bold] if (SYSTEM / f).exists()]
 
 
-def fit(draw, text, f, width):
-    if draw.textlength(text, font=f) <= width:
-        return text
-    while text and draw.textlength(text + "...", font=f) > width:
-        text = text[:-1]
-    return text.rstrip() + "..."
+@lru_cache(maxsize=None)
+def blank(f):
+    """What the font draws for a letter it doesn't have (its "missing" box), to tell real letters from it."""
+    m = f.getmask("\U0010fffd")
+    return m.size, bytes(m)
+
+
+@lru_cache(maxsize=100_000)
+def has(f, ch):
+    if ch.isspace():
+        return True
+    m = f.getmask(ch)
+    return (m.size, bytes(m)) != blank(f)
+
+
+def runs(text, chain):
+    """The text split into pieces, each with a font that has its letters. One font for all of it when one can."""
+    whole = next((f for f in chain if all(has(f, c) for c in text)), None)
+    if whole:
+        return [(text, whole)]
+    out = []
+    for c in text:
+        f = next((f for f in chain if has(f, c)), chain[0])
+        if out and out[-1][1] is f:
+            out[-1] = (out[-1][0] + c, f)
+        else:
+            out.append((c, f))
+    return out
+
+
+def width(text, chain):
+    return sum(f.getlength(t) for t, f in runs(text, chain))
+
+
+def write(d, xy, text, size, bold=False, fill="white", fit=None):
+    chain = fonts(size, bold)
+    if fit and width(text, chain) > fit:
+        while text and width(text + "...", chain) > fit:
+            text = text[:-1]
+        text = text.rstrip() + "..."
+    x, y = xy
+    base = y + chain[0].getmetrics()[0]  # one baseline for every font, so mixed scripts sit on the same line
+    for t, f in runs(text, chain):
+        d.text((x, base), t, font=f, fill=fill, anchor="ls")
+        x += f.getlength(t)
 
 
 def rounded(im, size, radius):
@@ -45,25 +94,24 @@ def render(year, s, artist, tracks, images):
     card = Image.alpha_composite(card, glass)
     d = ImageDraw.Draw(card)
     grey = (255, 255, 255, 170)
-    d.text((80, 90), f"My {year} in music", font=font(44, True), fill="white")
-    d.text((72, 150), f"{s['minutes']:,}", font=font(170, True), fill="white")
-    d.text((80, 350), "minutes listened", font=font(40), fill=grey)
+    write(d, (80, 90), f"My {year} in music", 44, True)
+    write(d, (72, 150), f"{s['minutes']:,}", 170, True)
+    write(d, (80, 350), "minutes listened", 40, fill=grey)
     if artist:
         if artist["image"] in images:
             photo = rounded(images[artist["image"]], 200, 100)
             card.alpha_composite(photo, (80, 450))
-        d.text((310, 490), "Top artist", font=font(32), fill=grey)
-        d.text((310, 535), fit(d, artist["name"], font(64, True), W - 390), font=font(64, True), fill="white")
-    d.text((96, 740), "Top songs", font=font(34, True), fill="white")
+        write(d, (310, 490), "Top artist", 32, fill=grey)
+        write(d, (310, 535), artist["name"], 64, True, fit=W - 390)
+    write(d, (96, 740), "Top songs", 34, True)
     for i, t in enumerate(tracks):
         y = 805 + i * 82
         if t["image"] in images:
             card.alpha_composite(rounded(images[t["image"]], 64, 12), (96, y))
-        d.text((184, y + 4), fit(d, f"{i + 1}. {t['name']}", font(32, True), W - 300), font=font(32, True), fill="white")
-        d.text((184, y + 40), fit(d, t["artists"] or "", font(24), W - 300), font=font(24), fill=grey)
-    d.text((80, H - 80), f"{s['plays']:,} plays · {s['tracks']:,} songs · {s['artists']:,} artists",
-           font=font(28), fill=grey)
-    out = Path.home() / "Downloads" / f"Spotify Wrapped {year}.png"
+        write(d, (184, y + 4), f"{i + 1}. {t['name']}", 32, True, fit=W - 300)
+        write(d, (184, y + 40), t["artists"] or "", 24, fill=grey, fit=W - 300)
+    write(d, (80, H - 80), f"{s['plays']:,} plays · {s['tracks']:,} songs · {s['artists']:,} artists", 28, fill=grey)
+    out = DOWNLOADS / f"Wavelog Wrapped {year}.png"
     out.parent.mkdir(exist_ok=True)
     card.convert("RGB").save(out)
     return str(out)

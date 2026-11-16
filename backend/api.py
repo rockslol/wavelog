@@ -406,7 +406,8 @@ async def export():
     rows = db.execute(f"SELECT datetime(p.played_at, 'localtime'), t.name, {ARTISTS}, al.name, p.ms_played, p.source, p.track_id "
                       "FROM plays p LEFT JOIN tracks t ON t.id = p.track_id LEFT JOIN albums al ON al.id = t.album_id "
                       "ORDER BY p.played_at").fetchall()
-    out = Path.home() / "Downloads" / f"Spotify plays {date.today()}.csv"
+    from pcwatch import DOWNLOADS
+    out = DOWNLOADS / f"Wavelog plays {date.today()}.csv"
     out.parent.mkdir(exist_ok=True)
     with open(out, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)

@@ -14,7 +14,8 @@ if (getCurrentWindow().label !== "stats") {
   });
 }
 
-export const API = "http://127.0.0.1:8721";
+export const API = "http://127.0.0.1:8721"; // also in main.rs (LOGGER), the CSP in tauri.conf.json and backend/spotify.py
+export const LOGIN = API + "/login";
 export const get = (path) => fetch(API + path).then((r) => (r.ok ? r.json() : Promise.reject(r.status)));
 
 export function usePoll(path, ms) {

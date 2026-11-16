@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { API, get, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
+import { API, get, LOGIN, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { About, Advanced } from "./Advanced";
 import { installUpdate, startUpdateChecks, useUpdate } from "./update";
 import Columns from "./Columns";
@@ -16,12 +16,12 @@ const Open = createContext(() => {});
 const RANGES = [["today", "Today"], ["week", "7 days"], ["month", "30 days"], ["year", "12 months"], ["all", "All time"]];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const fmt = (n) => Math.round(n).toLocaleString("en-US");
+const fmt = (n) => Math.round(n).toLocaleString();
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const nice = (s) => {
   const d = new Date(s + "T00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
 };
 const days = (n) => `${n} ${n === 1 ? "day" : "days"}`;
 const hours = (m) => `${fmt(m / 60)} ${Math.round(m / 60) === 1 ? "hour" : "hours"}`;
@@ -152,7 +152,7 @@ function Value({ v }) {
 // Change against the previous period, e.g. "↑ 12%". Hidden when there's nothing to compare with.
 const Delta = ({ v, vs }) => v == null ? null : (
   <span className={"delta " + (Math.abs(v) < 0.005 ? "same" : v > 0 ? "up" : "down")} title={vs}>
-    {Math.abs(v) < 0.005 ? "same" : `${v > 0 ? "↑" : "↓"} ${Math.abs(v) >= 9.995 ? Math.round(v * 100).toLocaleString("en-US") : Math.round(Math.abs(v) * 100)}%`}
+    {Math.abs(v) < 0.005 ? "same" : `${v > 0 ? "↑" : "↓"} ${Math.abs(v) >= 9.995 ? Math.round(v * 100).toLocaleString() : Math.round(Math.abs(v) * 100)}%`}
   </span>
 );
 
@@ -308,7 +308,7 @@ function Sidebar({ tab, setTab, detail }) {
           </div>
           <button className="pill" onClick={() => (auth === "no_client_id"
             ? (setTab("settings"), setPage("accounts"))
-            : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>{auth === "no_client_id" ? "Set up" : "Sign in"}</button>
+            : invoke("open_url", { url: LOGIN }))}>{auth === "no_client_id" ? "Set up" : "Sign in"}</button>
         </div>
       )}
       {(up.state === "available" || up.state === "installing") && (
@@ -527,7 +527,7 @@ function Mark({ text, q }) {
   return <>{text.slice(0, i)}<mark>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>;
 }
 
-const Status = ({ error }) => <div className="status">{error ? "Can't reach the logger at 127.0.0.1:8721. Is it running?" : "Loading"}</div>;
+const Status = ({ error }) => <div className="status">{error ? `Can't reach the logger at ${API.replace("http://", "")}. Is it running?` : "Loading"}</div>;
 
 function Top({ title, items, round, kind }) {
   const open = useContext(Open);
@@ -689,7 +689,7 @@ function Gaming({ tab, setTab }) {
   );
 }
 
-const shortDate = (t) => new Date(t * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const shortDate = (t) => new Date(t * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 function Wishlist() {
   const w = usePoll("/steam/wishlist", 1800000);
@@ -833,7 +833,7 @@ function LyricsView({ tab, setTab }) {
   }, [full]);
 
   const press = (key) => {
-    invoke("media", { key });
+    invoke("media", { key, app: "spotify" });
     if (key === "play") setOptimistic(!playing);
     setTimeout(() => setOptimistic(null), 2500);
     fetch(API + "/poke", { method: "POST" }).catch(() => {});
@@ -1148,7 +1148,7 @@ const accountStates = (now, lf, st) => [
 // Settings search. The index is read from the pages themselves (every Row, field and section title), so it never
 // goes stale; Advanced and About are their own components, so they're listed by hand. WORDS adds other ways to say it.
 const WORDS = {
-  "Start with Windows": "startup boot autostart", "Show or hide widgets": "hotkey shortcut keyboard", "Export plays to CSV": "excel spreadsheet download data",
+  "Start with Windows": "startup boot autostart", "Show or hide widgets": "hotkey shortcut keyboard", "Export plays to CSV": "excel spreadsheet download data", "Import Spotify history": "extended streaming export json zip old plays",
   "Glass tint": "dark transparent opacity", "Widget size": "scale bigger smaller zoom", "Lock positions": "move drag snap",
   "Hide over apps": "autohide auto-hide", "Volume pop-up": "osd", "Accent colour": "color", "Album colour glass": "color cover",
   "Open with": "hover click", "Layout": "edit arrange reorder sections dashboard", "Over games": "overlay fullscreen game",
@@ -1344,6 +1344,23 @@ function Settings({ tab, setTab }) {
     load();
     return () => ((stop = true), clearTimeout(id));
   }, [s?.lastfm_user, s?.lastfm_key, kick]);
+  const [hist, setHist] = useState(null); // Spotify history import: {running, done, total, added, ...}
+  const [histPath, setHistPath] = useState("");
+  const [histMsg, setHistMsg] = useState(null);
+  useEffect(() => void get("/import/history").then((j) => j.running && setHist(j)).catch(() => {}), []);
+  useEffect(() => {
+    if (!hist?.running) return;
+    const id = setTimeout(() => get("/import/history").then(setHist).catch(() => {}), 1000);
+    return () => clearTimeout(id);
+  }, [hist]);
+  const importHistory = () => {
+    setHistMsg(null);
+    send("/import/history", "POST", { path: histPath }).then((j) => (setHist(j), setHistPath(""))).catch((e) => setHistMsg(e.message));
+  };
+  const histHint = hist?.running ? `Importing: ${fmt(hist.done)} of ${fmt(hist.total)} plays read · ${fmt(hist.added)} added, ${fmt(hist.merged)} already here`
+    : hist?.error ? hist.error
+    : hist?.finished ? `Done: ${fmt(hist.added)} plays added, ${fmt(hist.merged)} already here, ${fmt(hist.short)} under 30 s skipped.${hist.missing ? ` ${fmt(hist.missing)} songs get their details in the background (about ${Math.ceil(hist.missing / 30)} min)` : ""}`
+    : "Spotify's Extended streaming history: request it at spotify.com, Account, Privacy settings. Pick the .zip it sends, or its folder";
   const importLastfm = (full) => fetch(API + `/lastfm/sync?full=${full}`, { method: "POST" }).then((r) => r.json()).then((j) => (setLf(j), setKick((k) => k + 1))).catch(() => {});
   const [exported, setExported] = useState(null);
   const exportCsv = () => {
@@ -1357,7 +1374,7 @@ function Settings({ tab, setTab }) {
     const j = r && (await r.json().catch(() => null));
     if (!r?.ok) return setMsg(j?.detail || "Couldn't save");
     setS(j);
-    setMsg("Saved");
+    setMsg(j.warning || "Saved"); // a city or key that didn't check out keeps its old value; the rest is saved
     applyWidgets(j);
     emit("settings");
   };
@@ -1437,7 +1454,7 @@ function Settings({ tab, setTab }) {
         </Row>
         <Row label="Hide over apps" hint="Hidden while a window is under it, so it never covers tabs or buttons. Rest the mouse on the top edge of the screen to bring it back">{nSwitch("autohide")}</Row>
         <Row label="Lyrics line" hint="The current lyric replaces the song name">{nSwitch("lyrics")}</Row>
-        <Row label="Alerts" hint="Focus timer, events starting soon and match results">{nSwitch("alerts")}</Row>
+        <Row label="Alerts" hint="Focus timer, events starting soon and alerts from plugins">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
         <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
         <Row label="Other players" hint="YouTube, VLC, Apple Music and other apps show in the notch while Spotify isn't playing">{nSwitch("other_players")}</Row>
@@ -1550,7 +1567,7 @@ function Settings({ tab, setTab }) {
       <section className="card group">
         <Row label={<span className="dot-label"><i className={acc[0][1]} />Spotify</span>}
           hint={!nowA ? "Checking" : nowA.auth === "ok" ? "Signed in, plays are being recorded" : nowA.auth === "no_client_id" ? "Paste your Client ID below to start" : "Signed out. Plays aren't being recorded"}>
-          {nowA?.auth !== "no_client_id" && <button className="pill glass" onClick={() => invoke("open_url", { url: "http://127.0.0.1:8721/login" })}>{nowA?.auth === "ok" ? "Sign in again" : "Sign in"}</button>}
+          {nowA?.auth !== "no_client_id" && <button className="pill glass" onClick={() => invoke("open_url", { url: LOGIN })}>{nowA?.auth === "ok" ? "Sign in again" : "Sign in"}</button>}
         </Row>
         <SecretField label="Client ID from developer.spotify.com/dashboard" value={s.client_id} placeholder="Paste your app's Client ID" save={(v) => set({ client_id: v })} />
         <div className="field"><span>Redirect URI to add in the dashboard</span><code className="mono">{s.redirect}</code></div>
@@ -1586,6 +1603,12 @@ function Settings({ tab, setTab }) {
       </section>
       <h4>Your data</h4>
       <section className="card group">
+        <Row label="Import Spotify history" hint={histMsg || histHint} />
+        <div className="pl-path">
+          <input value={histPath} onChange={(e) => setHistPath(e.target.value)} placeholder="C:\Users\you\Downloads\my_spotify_data.zip" spellCheck={false}
+            disabled={hist?.running} onKeyDown={(e) => e.key === "Enter" && histPath.trim() && importHistory()} />
+          <button className="pill glass" disabled={!histPath.trim() || hist?.running} onClick={importHistory}>Import</button>
+        </div>
         <Row label="Export plays to CSV" hint={exported?.msg || "Every play, as a spreadsheet in Downloads"}>
           <div className="size-picker">
             {exported?.path && <button className="link" onClick={() => invoke("reveal", { path: exported.path })}>Show in folder</button>}
@@ -1663,7 +1686,7 @@ function Settings({ tab, setTab }) {
     places: <>
       <h4>Weather</h4>
       <section className="card group">
-        <label className="field"><span>City{s.place ? ` · showing ${s.place}` : ""}</span><input {...field("city")} placeholder="Budapest" /></label>
+        <label className="field"><span>City{s.place ? ` · showing ${s.place}` : ""}</span><input {...field("city")} placeholder="New York" /></label>
         <Row label="Units"><Segmented options={[["c", "°C"], ["f", "°F"]]} value={s.fahrenheit ? "f" : "c"} onChange={(v) => set({ fahrenheit: v === "f" })} /></Row>
       </section>
       <h4>Calendar</h4>

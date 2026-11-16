@@ -19,7 +19,7 @@ from db import db, save_track, ts
 
 log = logging.getLogger("lastfm")
 API = "https://ws.audioscrobbler.com/2.0/"
-http = httpx.AsyncClient(timeout=30, headers={"User-Agent": "sp-stats (local listening stats app)"})
+http = httpx.AsyncClient(timeout=30, headers={"User-Agent": "Wavelog (local listening stats app)"})
 db.executescript("""
 CREATE TABLE IF NOT EXISTS lastfm_map (artist TEXT, track TEXT, track_id TEXT, PRIMARY KEY (artist, track));
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);

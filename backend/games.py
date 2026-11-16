@@ -19,9 +19,14 @@ CREATE INDEX IF NOT EXISTS game_end ON game_sessions (end);
 if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'games'").fetchone():
     db.execute("INSERT INTO game_sessions (exe, title, start, end) SELECT exe, title, unixepoch('now') - seconds, unixepoch('now') FROM games")
     db.execute("DROP TABLE games")
-SKIP = {"explorer.exe", "brave.exe", "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "vlc.exe", "spotify.exe",
-        "spotify-stats.exe", "wavelog.exe", "wavelog-logger.exe", "code.exe", "obs64.exe", "applicationframehost.exe", "lockapp.exe", "searchhost.exe",
-        "shellexperiencehost.exe", "startmenuexperiencehost.exe", "mpc-hc64.exe", "potplayermini64.exe", "discord.exe"}
+# Fullscreen apps that aren't games: browsers, video players, chat, office, the shell.
+SKIP = {"explorer.exe", "brave.exe", "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "opera_gx.exe", "vivaldi.exe", "arc.exe",
+        "vlc.exe", "mpv.exe", "mpc-hc64.exe", "mpc-be64.exe", "potplayermini64.exe", "wmplayer.exe", "microsoft.media.player.exe",
+        "plex.exe", "plex htpc.exe", "kodi.exe", "stremio.exe", "netflix.exe", "photosapp.exe", "microsoft.photos.exe",
+        "spotify.exe", "wavelog.exe", "wavelog-logger.exe", "spotify-stats.exe", "discord.exe", "zoom.exe", "ms-teams.exe", "teams.exe",
+        "slack.exe", "whatsapp.exe", "telegram.exe", "code.exe", "obs64.exe", "powerpnt.exe", "winword.exe", "excel.exe",
+        "acrord32.exe", "acrobat.exe", "applicationframehost.exe", "lockapp.exe", "searchhost.exe", "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe", "msedgewebview2.exe", "steamwebhelper.exe", "textinputhost.exe"}
 EVERY = 15
 
 
@@ -73,7 +78,10 @@ async def track():
 
 
 def epoch(t):
-    return {"0": 0, "9": 1e11}.get(t) or calendar.timegm(datetime.strptime(t, "%Y-%m-%d %H:%M:%S").timetuple())
+    """A span() bound as a Unix time. "0" and "9" are span()'s open ends (0 is falsy, so no `or` here)."""
+    if t in ("0", "9"):
+        return 0 if t == "0" else 1e11
+    return calendar.timegm(datetime.strptime(t, "%Y-%m-%d %H:%M:%S").timetuple())
 
 
 @router.get("/gaming")

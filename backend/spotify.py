@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import hashlib
-import json
 import logging
 import secrets
 import time
@@ -10,13 +9,11 @@ from urllib.parse import urlencode
 
 import httpx
 
-from db import DATA
+from db import DATA, read_json, write_json
 
 CONFIG = DATA / "config.json"
-if not CONFIG.exists():
-    CONFIG.write_text('{"client_id": "", "port": 8721}')
-cfg = json.loads(CONFIG.read_text())
-PORT = cfg.get("port", 8721)
+cfg = read_json(CONFIG, {"client_id": ""})
+PORT = 8721  # also in the app (api.js, main.rs, the CSP in tauri.conf.json): change them together
 REDIRECT = f"http://127.0.0.1:{PORT}/callback"
 SCOPES = "user-read-currently-playing user-read-playback-state user-read-recently-played"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
@@ -30,7 +27,7 @@ auth = {"open_browser": False}
 
 def set_client_id(value):
     cfg["client_id"] = value.strip()
-    CONFIG.write_text(json.dumps(cfg))
+    write_json(CONFIG, cfg)
     auth["open_browser"] = True
 
 
@@ -42,7 +39,7 @@ def auth_state():
 log = logging.getLogger("spotify")
 http = httpx.AsyncClient(timeout=20)
 lock = asyncio.Lock()
-tokens = json.loads(TOKENS.read_text()) if TOKENS.exists() else None
+tokens = read_json(TOKENS, None)
 login = {}
 
 
@@ -53,9 +50,7 @@ def save(t):
         "refresh_token": t.get("refresh_token") or tokens["refresh_token"],
         "expires_at": time.time() + t["expires_in"] - 60,
     }
-    tmp = TOKENS.with_suffix(".tmp")
-    tmp.write_text(json.dumps(tokens))
-    tmp.replace(TOKENS)
+    write_json(TOKENS, tokens)
 
 
 def auth_url():
@@ -84,7 +79,7 @@ async def callback(code, state, error):
     ))
     if r.status_code != 200:
         log.error("Token exchange failed: %s %s", r.status_code, r.text)
-        return "Token exchange failed, see data/app.log"
+        return "Token exchange failed, see the log in Wavelog: Settings > Advanced"
     save(r.json())
     login.pop("future").set_result(None)
     login.clear()
@@ -130,6 +125,7 @@ async def get(path, **params):
             if r.status_code == 401 and tokens:
                 tokens["expires_at"] = 0
                 await asyncio.sleep(delay)
+                delay = min(delay * 2, 300)
                 continue
             if r.status_code == 429:
                 wait = int(r.headers.get("Retry-After", delay))

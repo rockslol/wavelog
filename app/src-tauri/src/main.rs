@@ -8,7 +8,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use tauri_plugin_global_shortcut::ShortcutState;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 const WIDGETS: [&str; 13] = ["widget", "lyrics", "calendar", "photos", "weather", "system", "clock", "countdown", "todo", "timer", "note", "stack", "viz"];
 
@@ -35,13 +35,15 @@ static NOTCH_DROPS: AtomicBool = AtomicBool::new(true);
 const NOTCH_SIZE: (f64, f64) = (640.0, 780.0);
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static NOTCH_MONITOR: Mutex<String> = Mutex::new(String::new());
+/// The logger's address. Also in api.js, the CSP in tauri.conf.json and backend/spotify.py.
+const LOGGER: &str = "127.0.0.1:8721";
 
 fn start_backend() {
     use std::os::windows::process::CommandExt;
     let Ok(me) = std::env::current_exe() else { return };
     let exe = me.with_file_name("wavelog-logger.exe");
     let dev = me.parent().is_some_and(|d| d.ends_with("release") || d.ends_with("debug"));
-    let up = std::net::TcpStream::connect_timeout(&"127.0.0.1:8721".parse().unwrap(), Duration::from_millis(300)).is_ok();
+    let up = std::net::TcpStream::connect_timeout(&LOGGER.parse().unwrap(), Duration::from_millis(300)).is_ok();
     if !dev && !up && exe.exists() {
         *BACKEND.lock().unwrap() = std::process::Command::new(exe).creation_flags(0x08000000).spawn().ok();
     }
@@ -628,14 +630,33 @@ struct DuckCfg {
     level: f32,
 }
 
-fn http_get(path: &str) -> Option<serde_json::Value> {
+fn http(method: &str, path: &str) -> Option<serde_json::Value> {
     use std::io::{Read, Write};
-    let mut s = std::net::TcpStream::connect_timeout(&"127.0.0.1:8721".parse().ok()?, Duration::from_millis(500)).ok()?;
+    let mut s = std::net::TcpStream::connect_timeout(&LOGGER.parse().ok()?, Duration::from_millis(500)).ok()?;
     s.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
-    write!(s, "GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
+    write!(s, "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n").ok()?;
     let mut buf = String::new();
     s.read_to_string(&mut buf).ok()?;
     serde_json::from_str(buf.split_once("\r\n\r\n")?.1).ok()
+}
+
+fn http_get(path: &str) -> Option<serde_json::Value> {
+    http("GET", path)
+}
+
+/// Asks the logger to stop by itself (it keeps the song that's playing, so it still counts after the restart), and
+/// only kills it if it hasn't gone within 2 s.
+fn stop_logger(mut child: std::process::Child) {
+    let asked = http("POST", "/debug/shutdown").is_some();
+    for _ in 0..20 {
+        if !asked || !logger_up() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    if !matches!(child.try_wait(), Ok(Some(_))) {
+        let _ = child.kill();
+    }
 }
 
 fn duck_cfg() -> Option<DuckCfg> {
@@ -713,7 +734,14 @@ fn ducker() {
 
         let sessions = spotify_sessions();
         match (sessions.first().and_then(|s| unsafe { s.GetMasterVolume() }.ok()), want) {
-            (None, _) => (set_to, overridden, clear_since) = (None, false, None), // Spotify isn't playing on this PC
+            (None, _) => {
+                // Spotify isn't playing on this PC. Closed mid-dip, Windows keeps its lowered level for next time: put
+                // the volume from before the dip back once it's there again, like after a Wavelog crash.
+                if set_to.is_some() {
+                    left_over = *DUCK_BASE.lock().unwrap();
+                }
+                (set_to, overridden, clear_since) = (None, false, None);
+            }
             (Some(cur), true) => {
                 clear_since = None;
                 if let Some(t) = set_to {
@@ -785,15 +813,17 @@ impl windows::Win32::Media::MediaFoundation::IMFSensorActivitiesReportCallback_I
 
 fn camera_watch() {
     use windows::Win32::{Media::MediaFoundation::*, System::Com::*};
+    // Older Windows without the sensor monitor: try again now and then, not every 2 s (guarded() restarts it).
+    let unavailable = || thread::sleep(Duration::from_secs(600));
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         if MFStartup(MF_VERSION, MFSTARTUP_LITE).is_err() {
-            return;
+            return unavailable();
         }
         let cb: IMFSensorActivitiesReportCallback = CamWatch.into();
-        let Ok(monitor) = MFCreateSensorActivityMonitor(&cb) else { return };
+        let Ok(monitor) = MFCreateSensorActivityMonitor(&cb) else { return unavailable() };
         if monitor.Start().is_err() {
-            return;
+            return unavailable();
         }
         loop {
             thread::sleep(Duration::from_secs(3600)); // keeps the monitor alive; Windows calls CamWatch on its own thread
@@ -1068,7 +1098,7 @@ fn volume_keys() {
         use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let module = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
         if SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), module, 0).is_null() {
-            return;
+            return thread::sleep(Duration::from_secs(600));
         }
         let mut msg = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
@@ -1170,6 +1200,7 @@ fn ddc(set: Option<(usize, u32)>) -> Vec<(String, u32)> {
                 if GetMonitorBrightness(handle, &mut lo, &mut cur, &mut hi) == 0 || hi <= lo {
                     continue;
                 }
+                cur = cur.clamp(lo, hi); // some screens report a value outside their own range
                 if let Some((i, v)) = set {
                     if i == out.len() {
                         let want = lo + (hi - lo) * v.min(100) / 100;
@@ -1243,7 +1274,7 @@ fn shell_open(target: &str) {
 /// Opens a web page in the default browser: any https link, or the local logger (Spotify sign-in).
 #[tauri::command]
 fn open_url(url: String) {
-    if url.starts_with("https://") || url.starts_with("http://127.0.0.1:8721/") {
+    if url.starts_with("https://") || url.strip_prefix("http://").is_some_and(|u| u.starts_with(LOGGER) && u[LOGGER.len()..].starts_with('/')) {
         shell_open(&url);
     }
 }
@@ -1254,7 +1285,7 @@ fn devtools(window: tauri::WebviewWindow) {
 }
 
 fn logger_up() -> bool {
-    std::net::TcpStream::connect_timeout(&"127.0.0.1:8721".parse().unwrap(), Duration::from_millis(200)).is_ok()
+    std::net::TcpStream::connect_timeout(&LOGGER.parse().unwrap(), Duration::from_millis(200)).is_ok()
 }
 
 /// Second half of "Restart logger": the page asks the old logger to exit, then this starts a new one.
@@ -1279,10 +1310,46 @@ async fn start_logger() -> bool {
     false
 }
 
+/// Play/pause, next or previous, sent to that player's own media session: Spotify, or the app in `app` (its
+/// AppUserModelID from media_sessions). A media key goes to whichever player Windows picks, which was often YouTube
+/// in a browser instead of Spotify; it's only the fallback now.
 #[tauri::command]
-fn media(key: String) {
+async fn media(key: String, app: Option<String>) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if !app.is_some_and(|a| media_session(&key, &a)) {
+            media_key(&key);
+        }
+    }).await;
+}
+
+fn media_session(key: &str, app: &str) -> bool {
+    use windows::Media::Control::*;
+    unsafe {
+        let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+    }
+    let want = app.to_lowercase();
+    let Ok(sessions) = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().and_then(|op| op.join()).and_then(|m| m.GetSessions()) else {
+        return false;
+    };
+    let Some(s) = sessions.into_iter().find(|s| {
+        s.SourceAppUserModelId().is_ok_and(|id| {
+            let id = id.to_string().to_lowercase();
+            if want == "spotify" { id.contains("spotify") } else { id == want }
+        })
+    }) else {
+        return false;
+    };
+    let op = match key {
+        "prev" => s.TrySkipPreviousAsync(),
+        "next" => s.TrySkipNextAsync(),
+        _ => s.TryTogglePlayPauseAsync(),
+    };
+    op.and_then(|o| o.join()).unwrap_or(false)
+}
+
+fn media_key(key: &str) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
-    let vk = match key.as_str() {
+    let vk = match key {
         "prev" => VK_MEDIA_PREV_TRACK,
         "next" => VK_MEDIA_NEXT_TRACK,
         _ => VK_MEDIA_PLAY_PAUSE,
@@ -1499,6 +1566,8 @@ async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<
     }
     let k = scale.unwrap_or(1.0).clamp(0.5, 1.5);
     SCALE.store(k.to_bits(), Relaxed);
+    // New widgets go in columns down the main screen's left side (a saved position wins, see restore()).
+    let bottom = app.primary_monitor().ok().flatten().map_or(1000.0, |m| m.size().height as f64 / m.scale_factor() - 60.0);
     let (mut x, mut y) = (24.0, 24.0);
     // Built-in widgets, then plugin widgets: the ones asked for and any still open (so they get closed).
     let mut labels: Vec<String> = WIDGETS.iter().map(|l| l.to_string()).collect();
@@ -1520,7 +1589,7 @@ async fn set_widgets(app: AppHandle, list: Vec<(String, String)>, scale: Option<
                 let _ = win.set_zoom(k);
             }
             (None, Some((w, h))) => {
-                if y + h > 1000.0 {
+                if y + h > bottom {
                     (x, y) = (x + 390.0 * k, 24.0);
                 }
                 make(&app, label, w, h, x, y).map_err(|e| e.to_string())?;
@@ -1699,12 +1768,14 @@ fn plugin_overlays(app: &AppHandle) {
     }
 }
 
+/// Into the logger's app.log, in the same data folder it picks (installs from before the rename keep "Spotify Stats").
 fn applog(msg: &str) {
     use std::io::Write;
-    if let Some(dir) = std::env::var_os("APPDATA") {
-        if let Ok(mut l) = std::fs::OpenOptions::new().append(true).open(std::path::Path::new(&dir).join("Wavelog").join("app.log")) {
-            let _ = writeln!(l, "wavelog.exe: {msg}");
-        }
+    let Some(base) = std::env::var_os("APPDATA").map(std::path::PathBuf::from) else { return };
+    let (new, old) = (base.join("Wavelog"), base.join("Spotify Stats"));
+    let dir = if old.exists() && !new.exists() { old } else { new };
+    if let Ok(mut l) = std::fs::OpenOptions::new().append(true).open(dir.join("app.log")) {
+        let _ = writeln!(l, "wavelog.exe: {msg}");
     }
 }
 
@@ -1751,13 +1822,7 @@ fn main() {
                 show_stats(app, None);
             }
         }))
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["ctrl+alt+s"])
-                .unwrap()
-                .with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) })
-                .build(),
-        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, _, e| if e.state == ShortcutState::Pressed { toggle(app) }).build())
         .invoke_handler(tauri::generate_handler![open_stats, stats_ready, backdrop, set_widgets, reveal, notch, media, volume, spotify_volume, mic_users, camera_users, audio_outputs, set_audio_output, open_spotify, open_url, devtools, start_logger, notch_monitor, monitors, shelf_drag, media_sessions, mixer, set_app_volume, brightness, set_overlays])
         .setup(|app| {
             FULLSCREEN.store(fullscreen_foreground(), Relaxed);
@@ -1767,6 +1832,11 @@ fn main() {
                 SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, std::ptr::null_mut(), Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT);
             }
             start_backend();
+            // Registered here, not in the plugin builder: if another app already owns Ctrl+Alt+S, Wavelog still starts
+            // (the tray menu does the same).
+            if let Err(e) = app.global_shortcut().register("ctrl+alt+s") {
+                applog(&format!("Ctrl+Alt+S is taken by another app ({e}); use the tray menu to show or hide widgets"));
+            }
             let handle = app.handle().clone();
             guarded("windows", move || apply_settings(&handle));
 
@@ -1792,13 +1862,13 @@ fn main() {
             let handle = app.handle().clone();
             guarded("overlays", move || plugin_overlays(&handle));
             let handle = app.handle().clone();
-            thread::spawn(move || notch_hover(&handle));
+            guarded("notch hover", move || notch_hover(&handle));
             let handle = app.handle().clone();
-            thread::spawn(move || notch_audio(&handle));
+            guarded("notch audio", move || notch_audio(&handle));
             let handle = app.handle().clone();
-            thread::spawn(move || viz_audio(&handle));
-            thread::spawn(volume_keys);
-            thread::spawn(camera_watch);
+            guarded("visualizer", move || viz_audio(&handle));
+            guarded("volume keys", volume_keys);
+            guarded("camera", camera_watch);
             guarded("ducker", ducker);
             let handle = app.handle().clone();
             thread::spawn(move || loop {
@@ -1820,11 +1890,16 @@ fn main() {
                 api.prevent_exit();
             }
             if let tauri::RunEvent::Exit = e {
-                if let Some(mut c) = BACKEND.lock().unwrap().take() {
-                    let _ = c.kill();
+                if let Some(c) = BACKEND.lock().unwrap().take() {
+                    stop_logger(c);
                 }
-                if let Some(base) = take_duck_base() {
-                    set_spotify(&spotify_sessions(), base); // don't leave Spotify quiet when Wavelog quits mid-dip
+                // Don't leave Spotify quiet when Wavelog quits mid-dip. If Spotify is closed right now, the saved volume
+                // stays on disk and the next start puts it back.
+                let sessions = spotify_sessions();
+                if !sessions.is_empty() {
+                    if let Some(base) = take_duck_base() {
+                        set_spotify(&sessions, base);
+                    }
                 }
             }
         });

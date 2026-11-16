@@ -53,14 +53,14 @@ export function CalendarHeat({ days, from, to, title = "Listening calendar" }) {
   const months = cells.filter((c) => c.date.getDate() === 1 || c === cells[0]);
   const total = cells.reduce((a, c) => a + c.v, 0), active = cells.filter((c) => c.v).length;
   return (
-    <Shell title={title} hint={`${active} days with music · ${total.toLocaleString("en-US")} min`} tip={tip}>
+    <Shell title={title} hint={`${active} days with music · ${total.toLocaleString()} min`} tip={tip}>
       <svg className="heat" viewBox={`0 0 ${L + cols * (S + G)} ${T + 7 * (S + G)}`} onPointerLeave={() => setTip(null)}>
         {months.map((c) => <text key={c.key} className="axis" x={L + c.col * (S + G)} y={11}>{MONTHS[c.date.getMonth()]}</text>)}
         {[0, 2, 4].map((r) => <text key={r} className="axis" x={0} y={T + r * (S + G) + 10}>{DOW[r]}</text>)}
         {cells.map((c) => (
           <rect key={c.key} x={L + c.col * (S + G)} y={T + c.row * (S + G)} width={S} height={S} rx={3}
             className={"lv" + level(c.v, max)} tabIndex={0}
-            onPointerEnter={(e) => setTip(spot(e, `${c.v} min`, c.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })))}
+            onPointerEnter={(e) => setTip(spot(e, `${c.v} min`, c.date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })))}
             onFocus={(e) => setTip(spot(e, `${c.v} min`, c.key))} />
         ))}
       </svg>

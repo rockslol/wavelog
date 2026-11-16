@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { API, get, hidden, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
+import { API, get, hidden, LOGIN, NOTCH, NOTCH_SECTIONS, notchOptions, useLyrics, usePoll } from "./api";
 import { pimg, PluginSection, pluginSections, usePlugins } from "./Plugins";
 import { condition, WeatherIcon } from "./widgets";
 
@@ -14,9 +14,7 @@ const parse = (s) => new Date(s.length === 10 ? s + "T00:00" : s);
 const tint = (c, a = 1) => c && `rgba(${c.map((v) => Math.round(255 * (0.3 + (0.7 * v) / Math.max(...c, 0.01)))).join(",")},${a})`;
 const since = (d) => d && new Date(d.replace(" ", "T")).toLocaleDateString(undefined, { month: "short", year: "numeric" });
 const bytes = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB");
-const APP_NAMES = { discord: "Discord", chrome: "Chrome", msedge: "Edge", brave: "Brave", firefox: "Firefox", opera: "Opera", zoom: "Zoom",
-  "ms-teams": "Teams", teams: "Teams", obs64: "OBS", steam: "Steam", steamwebhelper: "Steam", "valorant-win64-shipping": "Valorant",
-  riotclientservices: "Riot Client", whatsapp: "WhatsApp", slack: "Slack", medalencoder: "Medal", medal: "Medal", windowscamera: "Camera" };
+let APP_NAMES = {}; // exe name -> display name, from the logger (pcwatch.NAMES) with /pc/live
 const appName = (exe) => {
   const b = exe.replace(/\.exe$/i, "");
   return APP_NAMES[b.toLowerCase()] || b.charAt(0).toUpperCase() + b.slice(1);
@@ -203,6 +201,7 @@ export default function Notch() {
     value: spNow.auth === "no_client_id" ? "Set up" : "Sign in", short: "Sign in",
   };
   const dls = pcl?.downloads;
+  if (pcl?.names) APP_NAMES = pcl.names;
   // Live from Rust (mic: audio capture sessions, camera: Media Foundation's sensor monitor), plus the logger's registry
   // check, which only older Windows 11 builds still fill in.
   const mics = [...new Set([...(pcl?.mic || []), ...micApps.map(appName)])];
@@ -307,7 +306,7 @@ export default function Notch() {
         if (otherPlay.current?.key === key) (otherPlay.current.ms += t - otherPlay.current.last), (otherPlay.current.last = t);
         else otherPlay.current = { key, app: playerName(s.app), title: s.title, artist: s.artist, ms: 0, last: t };
       }
-      setOther(s ? { id: "other:" + key, other: true, app: playerName(s.app), name: s.title, artists: s.artist || playerName(s.app),
+      setOther(s ? { id: "other:" + key, other: true, app: playerName(s.app), aumid: s.app, name: s.title, artists: s.artist || playerName(s.app),
         image: s.thumb, playing: true, progress_ms: s.position_ms, duration_ms: s.duration_ms, at: t } : null);
     }).catch(() => {});
     load();
@@ -528,7 +527,7 @@ export default function Notch() {
   const shelfDo = (method, path) => fetch(API + "/shelf" + path, { method }).then((r) => r.json()).then((l) => Array.isArray(l) && setShelf(l)).catch(() => {});
 
   const press = (key) => {
-    invoke("media", { key });
+    invoke("media", { key, app: now?.other ? now.aumid : "spotify" }); // to that player, not whichever one Windows picks
     if (key === "play") setNow((n) => ({ ...n, playing: !n.playing, progress_ms: pos, at: Date.now() }));
     fetch(API + "/poke", { method: "POST" }).then((r) => r.json()).then(fresh).catch(() => {});
   };
@@ -969,7 +968,7 @@ export default function Notch() {
           </> : <>
           {signin && (
             <div className="n-acts">
-              <button className="n-act n-signin" onClick={() => (spNow.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: "http://127.0.0.1:8721/login" }))}>
+              <button className="n-act n-signin" onClick={() => (spNow.auth === "no_client_id" ? invoke("open_stats") : invoke("open_url", { url: LOGIN }))}>
                 <span className="n-icon" style={{ color: signin.tone }}>{signin.icon}</span>
                 <span className="n-title">{signin.label}</span>
                 <b style={{ color: signin.tone }}>{signin.value}</b>

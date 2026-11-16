@@ -37,7 +37,7 @@ export default function Widget() {
   const progress = now?.id ? pos / now.duration_ms : 0;
   const cover = now?.image ? <img className="cover" src={now.image} draggable={false} /> : <div className="cover" />;
   const title = <div className="title">{offline ? "Logger offline" : now?.name || "Nothing playing"}</div>;
-  const artist = <div className="sub">{offline ? "Start the backend" : now?.artists}</div>;
+  const artist = <div className="sub">{offline ? "Restart it in Settings → Advanced" : now?.artists}</div>;
   const bar = <div className="bar"><div style={{ width: progress * 100 + "%" }} /></div>;
   const ly = useLyrics(showLyrics ? now?.id : null, pos, now?.duration_ms);
   const at = Math.max(ly.i, 0);

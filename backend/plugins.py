@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, Response
 
 import poller
 import wavelog
-from db import DATA, db, ts
+from db import DATA, db, read_json, ts, write_json
 from version import VERSION
 
 log = logging.getLogger("plugins")
@@ -47,7 +47,7 @@ TYPES = {"switch", "text", "number", "slider", "choice"}
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
           ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 http = httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent": "Wavelog plugin (local app)"})
-state = json.loads(STATE.read_text("utf-8")) if STATE.exists() else {}
+state = read_json(STATE, {})
 loaded = {}  # id -> Loaded
 alerts = deque(maxlen=50)
 alert_ids = iter(range(1, 1 << 62))
@@ -55,7 +55,7 @@ watcher = None
 
 
 def save_state():
-    STATE.write_text(json.dumps(state, indent=1), "utf-8")
+    write_json(STATE, state, 1)
 
 
 def version_tuple(v):
@@ -116,11 +116,11 @@ class Ctx:
         """A dict saved as store.json in the plugin's data folder. Call ctx.save() after changing it."""
         if self._store is None:
             f = self.data / "store.json"
-            self._store = json.loads(f.read_text("utf-8")) if f.exists() else {}
+            self._store = read_json(f, {})
         return self._store
 
     def save(self):
-        (self.data / "store.json").write_text(json.dumps(self._store or {}), "utf-8")
+        write_json(self.data / "store.json", self._store or {})
 
     @property
     def db(self):
@@ -365,7 +365,7 @@ def adopt_valorant():
         n = settings.get("notch") or {}
         if n.get("sections"):
             n["sections"] = ["p_valorant_last_match" if s == "valorant" else s for s in n["sections"]]
-        FILE.write_text(json.dumps(settings, indent=2))
+        write_json(FILE, settings, 2)
         log.info("Valorant moved into its plugin")
     state["_moved_valorant"] = True
     save_state()
@@ -381,7 +381,7 @@ async def dismiss_notice():
 def discover():
     """Installed plugins plus developer folders (a developer folder wins over an installed copy with the same id)."""
     found, errors = {}, []
-    for folder in sorted(p for p in ROOT.iterdir() if p.is_dir()):
+    for folder in sorted(p for p in ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")):  # .x-new/.x-old: mid-install
         try:
             m = read_manifest(folder)
             found[m["id"]] = (folder, m, False)
@@ -496,40 +496,47 @@ def info(pl):
 
 # --- Installing ----------------------------------------------------------------------------------------------------
 def unpack(path):
-    """A plugin folder, or a .zip extracted into a temporary folder. Returns (folder, temporary or not)."""
+    """A plugin folder, or a .zip extracted into its own temporary folder. Returns (plugin folder, that temporary
+    folder or None), so two installs at once never clean up each other's files."""
     src = Path(str(path).strip().strip('"'))
     if src.is_dir():
-        return src, False
+        return src, None
     if src.suffix.lower() != ".zip" or not src.is_file():
         raise ValueError("Pick a plugin folder or a .zip")
     out = TMP / uuid.uuid4().hex
     out.mkdir(parents=True)
-    with zipfile.ZipFile(src) as z:
-        for member in z.infolist():
-            target = (out / member.filename).resolve()
-            if not target.is_relative_to(out.resolve()):
-                raise ValueError("The zip has files outside its folder")
-        z.extractall(out)
+    try:
+        with zipfile.ZipFile(src) as z:
+            for member in z.infolist():
+                target = (out / member.filename).resolve()
+                if not target.is_relative_to(out.resolve()):
+                    raise ValueError("The zip has files outside its folder")
+            z.extractall(out)
+    except BaseException:
+        cleanup(out)
+        raise
     inner = [p for p in out.iterdir()]
     if not (out / "plugin.json").exists() and len(inner) == 1 and inner[0].is_dir():
-        return inner[0], True
-    return out, True
+        return inner[0], out
+    return out, out
 
 
-def cleanup():
-    shutil.rmtree(TMP, ignore_errors=True)
+def cleanup(tmp):
+    if tmp:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @router.post("/plugins/inspect")
 async def inspect_plugin(body: dict = Body(...)):
     """Read a plugin before installing it, for the install screen."""
+    tmp = None
     try:
-        folder, _ = unpack(body.get("path", ""))
+        folder, tmp = unpack(body.get("path", ""))
         m = read_manifest(folder)
     except Exception as e:
         raise HTTPException(400, str(e))
     finally:
-        cleanup()
+        cleanup(tmp)
     have = loaded.get(m["id"])
     return {"id": m["id"], "name": m["name"], "version": m.get("version", ""), "author": m.get("author", ""),
             "description": m.get("description", ""), "uses": uses(m),
@@ -539,22 +546,34 @@ async def inspect_plugin(body: dict = Body(...)):
 async def install_path(path, check=None):
     """Install (or update) a plugin from a folder or zip. `check(manifest)` can refuse it before anything changes.
     A new plugin starts on; an update keeps whatever on/off and settings it had."""
+    unpacked = None
     try:
-        folder, _ = unpack(path)
+        folder, unpacked = unpack(path)
         m = read_manifest(folder)
         if check:
             check(m)
-        pid, dest, tmp = m["id"], ROOT / m["id"], ROOT / f".{m['id']}-new"
+        pid, dest, tmp, old = m["id"], ROOT / m["id"], ROOT / f".{m['id']}-new", ROOT / f".{m['id']}-old"
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.copytree(folder, tmp, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"))
     except Exception as e:
-        cleanup()
         raise HTTPException(400, str(e))
-    cleanup()
+    finally:
+        cleanup(unpacked)
     if pl := loaded.get(pid):
         await stop(pl)
-    shutil.rmtree(dest, ignore_errors=True)
+    # Move the old copy aside first: if a file in it is open somewhere, nothing has been deleted yet and the old version
+    # simply keeps running.
+    shutil.rmtree(old, ignore_errors=True)
+    try:
+        if dest.exists():
+            dest.rename(old)
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if pl:
+            await reload(pid)
+        raise HTTPException(409, "A file of the installed version is in use. Close what has it open and try again")
     tmp.rename(dest)
+    shutil.rmtree(old, ignore_errors=True)
     state.setdefault(pid, {}).setdefault("enabled", True)
     save_state()
     await reload(pid)
@@ -744,7 +763,10 @@ async def get_plugin(body: dict = Body(...)):
         if m["id"] != pid or str(m.get("version")) != str(e.get("version")):
             raise ValueError("The download isn't the plugin the list describes")
 
-    return await install_path(f, check=same)
+    try:
+        return await install_path(f, check=same)
+    finally:
+        f.unlink(missing_ok=True)
 
 
 # --- Settings > Plugins --------------------------------------------------------------------------------------------
@@ -764,7 +786,8 @@ def coerce(spec, v):
         v = float(v)
         lo, hi = spec.get("min"), spec.get("max")
         v = max(lo, v) if lo is not None else v
-        return min(hi, v) if hi is not None else v
+        v = min(hi, v) if hi is not None else v
+        return int(v) if t == "number" and v.is_integer() else v  # a whole number stays one: 5, not 5.0
     if t == "choice":
         opts = [o[0] if isinstance(o, (list, tuple)) else o for o in spec.get("options") or []]
         if v not in opts:

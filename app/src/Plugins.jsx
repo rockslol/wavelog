@@ -140,7 +140,7 @@ function Block({ b, run, compact }) {
             <div key={i} className="card tile">
               <div className="label">{t.label}</div>
               <div className={"value" + (word(t.value) ? " word" : "")} title={typeof t.value === "string" ? t.value : undefined}>
-                {typeof t.value === "number" ? t.value.toLocaleString("en-US") : t.value}
+                {typeof t.value === "number" ? t.value.toLocaleString() : t.value}
               </div>
               {t.sub && <div className="sub">{t.sub}</div>}
             </div>

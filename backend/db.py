@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import sqlite3
 import sys
@@ -5,17 +7,41 @@ import time
 from datetime import date
 from pathlib import Path
 
+from paths import installed_dir
+
+
 def data_dir():
-    """Installed: %APPDATA%\\Wavelog. Installs from before the rename keep using %APPDATA%\\Spotify Stats."""
-    if not getattr(sys, "frozen", False):
-        return Path(__file__).resolve().parent.parent / "data"
-    base = Path(os.environ["APPDATA"])
-    new, old = base / "Wavelog", base / "Spotify Stats"
-    return old if old.exists() and not new.exists() else new
+    """WAVELOG_DATA if set, the installed folder when frozen, data/ next to the code when run from source."""
+    if os.environ.get("WAVELOG_DATA"):
+        return Path(os.environ["WAVELOG_DATA"])
+    return installed_dir() if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent / "data"
 
 
 DATA = data_dir()
 DATA.mkdir(parents=True, exist_ok=True)
+
+
+def read_json(path, default):
+    """A JSON file, or `default` when it's missing. A broken file is kept as <name>.bad and doesn't stop the logger."""
+    try:
+        return json.loads(Path(path).read_text("utf-8"))
+    except FileNotFoundError:
+        return default
+    except (OSError, ValueError) as e:
+        logging.getLogger("db").error("%s is unreadable (%s), starting it fresh; the old one is kept as .bad", path, e)
+        try:
+            Path(path).replace(Path(path).with_name(Path(path).name + ".bad"))
+        except OSError:
+            pass
+        return default
+
+
+def write_json(path, value, indent=None):
+    """Writes a temporary file and swaps it in, so a crash mid-write never leaves a half-written file."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(value, indent=indent), "utf-8")
+    tmp.replace(path)
 
 db = sqlite3.connect(DATA / "spotify.db", check_same_thread=False, isolation_level=None, timeout=30)
 db.executescript("""

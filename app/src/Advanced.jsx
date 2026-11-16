@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { API, get } from "./api";
+import { API, get, LOGIN } from "./api";
 import { REPO } from "./meta";
 import { checkForUpdate, installUpdate, useUpdate } from "./update";
 import { Row, Segmented, Switch } from "./Stats";
@@ -16,7 +16,7 @@ const ago = (t) => {
   return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
 };
 const size = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB");
-const fmt = (n) => (n ?? 0).toLocaleString("en-US");
+const fmt = (n) => (n ?? 0).toLocaleString();
 const post = (path, body) =>
   fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) }).then((r) => r.json());
 const STAMP = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d/;
@@ -81,7 +81,7 @@ export function Advanced() {
 
   if (down && !info) return (
     <section className="card group">
-      <Row label="Logger" hint="Not answering on 127.0.0.1:8721">
+      <Row label="Logger" hint={`Not answering on ${API.replace("http://", "")}`}>
         <button className="pill glass" onClick={restart}>{msg.logger || "Start it"}</button>
       </Row>
     </section>
@@ -98,7 +98,7 @@ export function Advanced() {
         </Row>
         <Row label={<span className="dot-label"><i className={info.spotify.signed_in ? "ok" : "bad"} />Spotify</span>}
           hint={!info.spotify.client_id ? "No Client ID yet. Add it in General" : info.spotify.signed_in ? "Signed in" : "Not signed in"}>
-          <button className="pill glass" onClick={() => invoke("open_url", { url: "http://127.0.0.1:8721/login" })}>{info.spotify.signed_in ? "Sign in again" : "Sign in"}</button>
+          <button className="pill glass" onClick={() => invoke("open_url", { url: LOGIN })}>{info.spotify.signed_in ? "Sign in again" : "Sign in"}</button>
         </Row>
         <Row label="Database" hint={`${fmt(db.plays)} plays · ${fmt(db.tracks)} songs · ${fmt(db.artists)} artists · ${size(db.size)}${db.first ? ` · since ${db.first.slice(0, 10)}` : ""}${db.missing ? ` · ${fmt(db.missing)} songs waiting for details` : ""}`}>
           <button className="pill glass" onClick={backup}>Back up now</button>
@@ -168,7 +168,7 @@ export function About() {
   useEffect(() => {
     getVersion().then(setV).catch(() => {});
   }, []);
-  const built = new Date(__BUILD__).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const built = new Date(__BUILD__).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   return (
     <>
       <section className="card about">
@@ -176,7 +176,7 @@ export function About() {
         <div>
           <h2>Wavelog</h2>
           <div className="sub">Version {v || "dev"} · built {built}</div>
-          <p className="hint">Your Spotify listening, recorded and kept on this PC, with desktop widgets, a notch and stats. No account, no server, nothing leaves your computer except the calls to Spotify and the services you turn on.</p>
+          <p className="hint">Your Spotify listening, recorded and kept on this PC, with desktop widgets, a notch and stats. No account and no server: your plays never leave this PC.</p>
         </div>
       </section>
       <section className="card group">
@@ -204,9 +204,18 @@ export function About() {
       <section className="card group">
         <Row label="App" hint="Tauri, React, Vite, Inter font" />
         <Row label="Logger" hint="Python, FastAPI, SQLite, Pillow, psutil" />
-        <Row label="Data from" hint="Spotify Web API, LRCLIB and NetEase lyrics, Open-Meteo weather, Last.fm, the Riot Client on this PC" />
+        <Row label="Data from" hint="Spotify Web API, LRCLIB, NetEase and lyrics.ovh lyrics, Open-Meteo weather, Last.fm, Steam" />
       </section>
-      <p className="hint foot-note">Not affiliated with or endorsed by Spotify, Riot Games or Last.fm. The Valorant plugin uses unofficial Riot Client endpoints and can break after a game update.</p>
+      <h4>What goes online</h4>
+      <section className="card group">
+        <Row label="Spotify" hint="What's playing, recently played and song details, with your own sign-in" />
+        <Row label="Lyrics" hint="The title, artist and album of songs you play are looked up at LRCLIB, NetEase and lyrics.ovh, while lyrics are on in a widget or the notch" />
+        <Row label="Weather, calendars, photos" hint="Only once you set a city, add a calendar link or an iCloud album" />
+        <Row label="Last.fm and Steam" hint="Only once you add your account. With the notch's wishlist alerts on, your public Steam wishlist is checked even without a key" />
+        <Row label="Notch" hint="With No internet alert or Network speed on, Windows' own connection test page (msftconnecttest.com) is asked every 10 s" />
+        <Row label="Updates and plugins" hint="GitHub, for new versions and the plugin list. Plugins you install can connect wherever they say on their card" />
+      </section>
+      <p className="hint foot-note">Not affiliated with or endorsed by Spotify, Last.fm or Valve.</p>
     </>
   );
 }

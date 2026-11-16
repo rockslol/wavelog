@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 const H = 160;
 const L = 44;
-const compact = (v) => (v >= 10000 ? Math.round(v / 1000) + "K" : v.toLocaleString("en-US"));
+const compact = (v) => (v >= 10000 ? Math.round(v / 1000) + "K" : v.toLocaleString());
 
 function ticks(max) {
   const raw = Math.max(max, 4) / 4;
@@ -43,7 +43,7 @@ export default function Columns({ title, data, unit = "min" }) {
             <table>
               <tbody>
                 {data.map((d, i) => (
-                  <tr key={i}><td>{d.label}</td><td>{d.value.toLocaleString("en-US")} {unit}</td></tr>
+                  <tr key={i}><td>{d.label}</td><td>{d.value.toLocaleString()} {unit}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -84,7 +84,7 @@ export default function Columns({ title, data, unit = "min" }) {
         )}
         {h && !table && (
           <div className="tip glass" style={{ left: Math.min(Math.max(cx(hover), 80), w - 80), top: y(h.value) }}>
-            <b>{h.value.toLocaleString("en-US")} {unit}</b>
+            <b>{h.value.toLocaleString()} {unit}</b>
             <span>{h.label}</span>
           </div>
         )}

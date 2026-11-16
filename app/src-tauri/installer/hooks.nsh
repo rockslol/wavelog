@@ -7,6 +7,10 @@ Var WavelogFirst
 ; The logger is a separate process, Tauri's "app is running" check only covers the main exe.
 ; Without this an update can't replace the logger exe.
 !macro WAVELOG_STOP_LOGGER
+  ; Ask first: the logger then keeps the song that's playing, so it still counts after the update. curl.exe ships with
+  ; Windows 10 1803 and later; where it's missing this does nothing and the kill below does the job.
+  nsExec::Exec 'curl.exe -s -m 3 -X POST http://127.0.0.1:8721/debug/shutdown'
+  Sleep 800
   nsExec::Exec 'taskkill /F /T /IM wavelog-logger.exe'
   nsExec::Exec 'taskkill /F /T /IM sp-backend.exe'
   Sleep 400

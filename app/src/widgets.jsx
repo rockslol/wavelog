@@ -45,7 +45,7 @@ export function Lyrics() {
 function when(e) {
   const s = parse(e.start), today = new Date();
   const days = Math.round((new Date(s).setHours(0, 0, 0, 0) - today.setHours(0, 0, 0, 0)) / 86400000);
-  const day = days <= 0 ? "" : days === 1 ? "Tomorrow, " : s.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) + ", ";
+  const day = days <= 0 ? "" : days === 1 ? "Tomorrow, " : s.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + ", ";
   return day + (e.all_day ? "All day" : `${hm(s)} to ${hm(parse(e.end))}`);
 }
 
@@ -57,7 +57,7 @@ function Month({ events }) {
   const marked = new Set(events.map((e) => dayKey(parse(e.start))));
   return (
     <div className="month">
-      <div className="month-name">{d.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</div>
+      <div className="month-name">{d.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</div>
       <div className="grid">
         {["M", "T", "W", "T", "F", "S", "S"].map((w, k) => <span key={k} className="dow">{w}</span>)}
         {Array.from({ length: lead }, (_, k) => <span key={"x" + k} />)}
@@ -90,9 +90,9 @@ export function Calendar() {
     <Frame className="calendar">
       {size === "l" ? <Month events={ev || []} /> : (
         <div className="date">
-          <span>{d.toLocaleDateString("en-US", { weekday: "long" })}</span>
+          <span>{d.toLocaleDateString(undefined, { weekday: "long" })}</span>
           <b>{d.getDate()}</b>
-          {size === "m" && <span>{d.toLocaleDateString("en-US", { month: "long" })}</span>}
+          {size === "m" && <span>{d.toLocaleDateString(undefined, { month: "long" })}</span>}
         </div>
       )}
       <div className="events">{list}</div>
@@ -117,7 +117,8 @@ export function Photos() {
   return (
     <Frame plain className="photos">
       {under && <img className="photo" src={under} draggable={false} />}
-      {n ? <img key={url(k)} className="photo fade" src={url(k)} draggable={false} onLoad={(e) => setTimeout(() => setUnder(e.target.src), 1000)} />
+      {n ? <img key={url(k)} className="photo fade" src={url(k)} draggable={false} onLoad={(e) => setTimeout(() => setUnder(e.target.src), 1000)}
+        onError={() => n > 1 && setTimeout(() => setK((x) => x + 1), 1000)} />
         : <Empty>{p === null ? "Photos unavailable" : "Add an iCloud shared album or a photo folder in Settings"}</Empty>}
     </Frame>
   );
@@ -144,7 +145,8 @@ export function WeatherIcon({ code, day = 1 }) {
 export function Weather() {
   const size = useSize();
   const w = usePoll("/weather", 900000);
-  if (!w) return <Frame className="weather"><Empty>{w === null ? "Set your city in Settings" : ""}</Empty></Frame>;
+  const set = usePoll("/settings", 600000);
+  if (!w) return <Frame className="weather"><Empty>{w !== null || !set ? "" : set.lat == null ? "Set your city in Settings" : "Weather unavailable right now"}</Empty></Frame>;
   const lo = Math.min(...w.days.map((d) => d.low)), hi = Math.max(...w.days.map((d) => d.high));
   const hours = (
     <div className="hours">
@@ -170,7 +172,7 @@ export function Weather() {
           <div className="days">
             {w.days.map((d) => (
               <div key={d.date}>
-                <span>{parse(d.date).toLocaleDateString("en-US", { weekday: "short" })}</span>
+                <span>{parse(d.date).toLocaleDateString(undefined, { weekday: "short" })}</span>
                 <WeatherIcon code={d.code} />
                 <span className="low">{d.low}°</span>
                 <div className="range"><div style={{ left: ((d.low - lo) / (hi - lo || 1)) * 100 + "%", right: ((hi - d.high) / (hi - lo || 1)) * 100 + "%" }} /></div>
@@ -280,14 +282,14 @@ export function Clock() {
       {size !== "s" && (
         <div className="digital">
           <b>{hm(d)}</b>
-          <div className="sub">{d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
+          <div className="sub">{d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</div>
         </div>
       )}
     </Frame>
   );
 }
 
-const short = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const short = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 export function Countdown() {
   const size = useSize();
