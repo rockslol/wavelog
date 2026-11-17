@@ -5,7 +5,7 @@ import io
 import time
 from collections import defaultdict
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -423,3 +423,52 @@ async def daily(r: Range = R, year: int = None, limit: int = 60):
              "date(p.played_at, 'localtime') ORDER BY count(*) DESC, sum(p.ms_played) DESC) AS rk FROM plays p "
              f"JOIN tracks t ON t.id = p.track_id LEFT JOIN albums al ON al.id = t.album_id WHERE {WHERE} GROUP BY 1, t.id) "
              "WHERE rk = 1 ORDER BY day DESC LIMIT ?", *span(r, year), limit)
+
+
+def day_span(d):
+    start = datetime(d.year, d.month, d.day)
+    return ts(start.timestamp()), ts((start + timedelta(days=1)).timestamp())
+
+
+@router.get("/day/{day}")
+async def day_page(day: str):
+    """Everything played on one day: totals, hours, top songs and every play in order."""
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(404)
+    a, b = day_span(d)
+    rows = dict(db.execute(f"SELECT cast(strftime('%H', {START}) AS int), sum(p.ms_played) FROM plays p "
+                           f"WHERE {WHERE} GROUP BY 1", (a, b)).fetchall())
+    return {"day": day, **totals(a, b),
+            "hours": [{"hour": h, "minutes": round(rows.get(h, 0) / 60000)} for h in range(24)],
+            "top_tracks": q(TOP["tracks"] + " ORDER BY plays DESC, minutes DESC LIMIT 5", a, b),
+            "top_artists": q(TOP["artists"] + " ORDER BY plays DESC, minutes DESC LIMIT 5", a, b),
+            "log": q(f"SELECT strftime('%H:%M', {START}) AS at, t.id, t.name, {ARTISTS} AS artists, al.image_url AS image, "
+                       "p.ms_played / 1000 AS seconds FROM plays p JOIN tracks t ON t.id = p.track_id "
+                       f"LEFT JOIN albums al ON al.id = t.album_id WHERE {WHERE} ORDER BY p.played_at", a, b)}
+
+
+@router.get("/onthisday")
+async def on_this_day():
+    """Today's date in every earlier year that has plays: minutes and the most played song."""
+    t, out = date.today(), []
+    for y in sorted({int(r[0]) for r in db.execute("SELECT DISTINCT strftime('%Y', played_at, 'localtime') FROM plays")}, reverse=True):
+        if y >= t.year:
+            continue
+        try:
+            d = t.replace(year=y)
+        except ValueError:  # 29 February
+            continue
+        a, b = day_span(d)
+        s = totals(a, b)
+        if s["plays"]:
+            out.append({"year": y, "day": str(d), "ago": t.year - y, **s,
+                        "top": q(TOP["tracks"] + " ORDER BY plays DESC, minutes DESC LIMIT 1", a, b)[0]})
+    return out
+
+
+@router.get("/milestones")
+async def milestone_list(after: int = 0):
+    import milestones
+    return milestones.since(after)

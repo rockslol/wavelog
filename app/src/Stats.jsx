@@ -625,6 +625,91 @@ function Binged({ items }) {
   );
 }
 
+// The listening calendar, where a day with music opens that day's page.
+function Calendar(props) {
+  const open = useContext(Open);
+  return <CalendarHeat {...props} onPick={(id) => open({ kind: "day", id })} />;
+}
+
+// Today's date in earlier years: how much you listened and the song you played most.
+function OnThisDay({ items }) {
+  const open = useContext(Open);
+  const date = new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  return (
+    <section className="card">
+      <div className="head"><h3>On this day</h3><span className="hint">{date} in earlier years</span></div>
+      <div className="daily otd">
+        {items.map((x) => (
+          <button key={x.year} className="clickable" onClick={() => open({ kind: "day", id: x.day })}>
+            <Img src={x.top.image} big />
+            <div className="sub ago">{x.ago === 1 ? "A year ago" : `${x.ago} years ago`}</div>
+            <div className="name">{x.top.name}</div>
+            <div className="sub">{x.top.artists}</div>
+            <div className="sub">{fmt(x.minutes)} min · {fmt(x.plays)} {x.plays === 1 ? "play" : "plays"}</div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Day({ id, tab, setTab, back }) {
+  const open = useContext(Open);
+  const { data, error } = useApi({ x: `/day/${id}` });
+  const [all, setAll] = useState(false);
+  const x = data?.x, d = new Date(id + "T00:00");
+  const step = (n) => {
+    const t = new Date(d);
+    t.setDate(t.getDate() + n);
+    return iso(t);
+  };
+  const later = step(1) <= iso(new Date());
+  return (
+    <>
+      <Header tab={tab} setTab={setTab} title="">
+        <div className="day-nav">
+          <button className="pill glass" onClick={back}>Back</button>
+          <button className="pill glass" onClick={() => open({ kind: "day", id: step(-1) })}>Day before</button>
+          {later && <button className="pill glass" onClick={() => open({ kind: "day", id: step(1) })}>Day after</button>}
+        </div>
+      </Header>
+      {!x ? <Status error={error} /> : (
+        <div className="body">
+          <Ambient images={x.top_tracks.map((t) => t.image)} />
+          <section className="card wrapped-hero">
+            <div className="sub">{d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</div>
+            <div className="big-number">{fmt(x.minutes)}</div>
+            <p>{x.minutes === 1 ? "minute" : "minutes"} listened{x.minutes >= 60 ? `. That's ${hours(x.minutes)}.` : "."}</p>
+            <div className="sub">{fmt(x.plays)} plays · {fmt(x.tracks)} tracks · {fmt(x.artists)} artists</div>
+          </section>
+          {x.plays > 0 ? (
+            <>
+              <Columns title="By hour of day" data={hourData(x.hours)} />
+              <div className="grid2">
+                <Top title="Top tracks" items={x.top_tracks} kind="track" />
+                <Top title="Top artists" items={x.top_artists} round kind="artist" />
+              </div>
+              <section className="card">
+                <div className="head"><h3>Every play</h3><span className="hint">In the order you played them</span></div>
+                <ol className="list day-log">
+                  {(all ? x.log : x.log.slice(0, 50)).map((p, i) => (
+                    <li key={i} className="clickable" onClick={() => open({ kind: "track", id: p.id })}>
+                      <span className="rank">{p.at}</span>
+                      <Img src={p.image} />
+                      <div className="meta"><div className="name">{p.name}</div><div className="sub">{p.artists}</div></div>
+                    </li>
+                  ))}
+                </ol>
+                {!all && x.log.length > 50 && <button className="link day-more" onClick={() => setAll(true)}>Show all {fmt(x.log.length)} plays</button>}
+              </section>
+            </>
+          ) : <div className="status">No music on this day.</div>}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Daily({ items }) {
   const open = useContext(Open);
   return (
@@ -917,7 +1002,7 @@ function Overview({ tab, setTab }) {
     summary: "/summary?" + q, streaks: "/streaks?" + q, days: "/days?" + q, hours: "/hours?" + q, weekdays: "/weekdays?" + q,
     tracks: `/top/tracks?${q}&limit=10`, artists: `/top/artists?${q}&limit=10`, albums: `/top/albums?${q}&limit=10`, binged: `/binged?${q}&limit=5`,
     heat: "/heat?" + q, skips: `/skips?${q}&limit=5`, daily: `/daily?${q}&limit=60`,
-    ...(range === "week" || range === "month" || range === "year" ? { compare: "/compare?" + q } : {}), other: "/other?" + q,
+    ...(range === "week" || range === "month" || range === "year" ? { compare: "/compare?" + q } : {}), other: "/other?" + q, otd: "/onthisday",
   });
   const prev = d?.summary?.prev;
   const change = (k) => (prev && prev[k] > 0 ? (d.summary[k] - prev[k]) / prev[k] : null);
@@ -945,8 +1030,9 @@ function Overview({ tab, setTab }) {
           <Tile className="s4" label="Current streak" value={days(d.streaks.current)} sub="Days in a row with music" />
           <Tile className="s4" label="Longest streak" value={days(d.streaks.longest?.days || 0)}
             sub={d.streaks.longest && `${nice(d.streaks.longest.start)} to ${nice(d.streaks.longest.end)}`} />
+          {d.otd.length > 0 && <div className="s12"><OnThisDay items={d.otd} /></div>}
           {(range === "year" || range === "all") && (
-            <div className="s12"><CalendarHeat days={d.days} from={new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() + 1)} to={today} title="Last 12 months" /></div>
+            <div className="s12"><Calendar days={d.days} from={new Date(today.getFullYear() - 1, today.getMonth(), today.getDate() + 1)} to={today} title="Last 12 months" /></div>
           )}
           <div className="s6"><Columns title="By hour of day" data={hourData(d.hours)} /></div>
           <div className="s6"><Columns title="By day of week" data={dayData(d.weekdays)} /></div>
@@ -1023,7 +1109,7 @@ function Year({ year }) {
       </div>
       <Movers c={d.compare} vs={vsYear} title={`Risers and fallers since ${year - 1}`} />
       <Columns title="Minutes per month" data={timeline(d.days, null, year)} />
-      <CalendarHeat days={d.days} from={new Date(year, 0, 1)} to={new Date(Math.min(new Date(), new Date(year, 11, 31)))} title={`${year} in days`} />
+      <Calendar days={d.days} from={new Date(year, 0, 1)} to={new Date(Math.min(new Date(), new Date(year, 11, 31)))} title={`${year} in days`} />
       <HourHeat grid={d.heat} />
       <div className="grid2">
         <Columns title="By hour of day" data={hourData(d.hours)} />
@@ -1153,7 +1239,7 @@ const WORDS = {
   "Hide over apps": "autohide auto-hide", "Volume pop-up": "osd", "Accent colour": "color", "Album colour glass": "color cover",
   "Open with": "hover click", "Layout": "edit arrange reorder sections dashboard", "Over games": "overlay fullscreen game",
   "Mic and camera dot": "privacy microphone webcam", "Battery alerts": "controller headset mouse keyboard low",
-  "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
+  "Milestones": "celebrate achievements 100th play minutes record", "Notifications": "toast messages discord whatsapp", "Message text": "privacy screen share", "File shelf": "drag drop files",
   "Lower during calls": "duck ducking quieter discord teams", "Lower while a video plays": "duck youtube twitch quieter",
 "Lower in other games": "duck quieter", "Lower to": "duck volume level", "Lyrics under the song": "now playing music card", "Up next": "queue next song now playing music card", "Network speed": "internet download upload wifi mbps", "No internet alert": "offline wifi connection disconnected", "Wishlist sale alerts": "steam discount deal price cheaper", "Other players": "youtube vlc browser video apple music media", "Replace Windows' volume pop-up": "osd flyout hide volume keys", "Record other players": "youtube log history stats",
   "Spotify": "login sign in account client id", "Last.fm": "scrobbles import login api key", "Steam": "friends achievements api key login",
@@ -1456,6 +1542,7 @@ function Settings({ tab, setTab }) {
         <Row label="Lyrics line" hint="The current lyric replaces the song name">{nSwitch("lyrics")}</Row>
         <Row label="Alerts" hint="Focus timer, events starting soon and alerts from plugins">{nSwitch("alerts")}</Row>
         <Row label="Song change pop" hint="Grows with the cover for a moment when the song changes">{nSwitch("peek")}</Row>
+        <Row label="Milestones" hint="Celebrates your 100th play of a song, 1,000 plays of an artist, 10,000 minutes this year and more">{nSwitch("milestones")}</Row>
         <Row label="Volume pop-up" hint="Shows a bar when you change the PC volume with your keyboard, or Spotify's by scrolling">{nSwitch("osd")}</Row>
         <Row label="Other players" hint="YouTube, VLC, Apple Music and other apps show in the notch while Spotify isn't playing">{nSwitch("other_players")}</Row>
         {n.other_players && <Row label="Record other players" hint="Adds them to an Other players list on the Overview, kept apart from your Spotify stats">{nSwitch("other_log")}</Row>}
@@ -1842,12 +1929,13 @@ export default function Stats() {
   }, [plugKey]);
   const View = tab.startsWith("p.") ? PluginTab : { overview: Overview, wrapped: Wrapped, gaming: Gaming, lyrics: LyricsView, settings: Settings }[tab];
   const open = (d) => (setDetail(d), window.scrollTo(0, 0));
+  const Page = detail?.kind === "day" ? Day : Detail;
   return (
     <Open.Provider value={open}>
       <div className="shell">
         <Sidebar tab={tab} setTab={setTab} detail={detail} />
         <main className="stats" key={detail ? detail.kind + detail.id : tab}>
-          {detail ? <Detail key={detail.kind + detail.id} {...detail} tab={tab} setTab={setTab} back={() => setDetail(null)} /> : <View tab={tab} setTab={setTab} />}
+          {detail ? <Page key={detail.kind + detail.id} {...detail} tab={tab} setTab={setTab} back={() => setDetail(null)} /> : <View tab={tab} setTab={setTab} />}
         </main>
       </div>
     </Open.Provider>

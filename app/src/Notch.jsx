@@ -79,9 +79,9 @@ const Icon = ({ d }) => <svg viewBox="0 0 24 24"><path fillRule="evenodd" d={ICO
 // Each visualizer bar wobbles at its own speed around the real audio level.
 const WOBBLE = [[7.1, 0], [9.3, 1.7], [5.7, 3.1], [11.2, 4.4], [8.4, 2.3]];
 const NO_TIMER = { mode: "focus", left: null, end: null, done: 0, day: "" };
-const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam"]);
+const TILES = new Set(["timer", "calendar", "pc", "listening", "devices", "steam", "onthisday"]);
 const SECTION_ICON = { clock: "clock", music: "spotify", timer: "timer", calendar: "calendar", pc: "chip", listening: "chart", devices: "battery",
-  outputs: "speaker", mixer: "speaker", brightness: "sun", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", steam: "controller" };
+  outputs: "speaker", mixer: "speaker", brightness: "sun", downloads: "download", shelf: "tray", notifications: "bell", todos: "check", steam: "controller", onthisday: "calendar" };
 
 // A volume or brightness slider: drag or click anywhere on it. `every` limits how often it reports while dragging.
 function Slider({ value, onChange, every = 40 }) {
@@ -175,6 +175,7 @@ export default function Notch() {
   const today = usePoll(open && on("listening") ? "/today" : null, 60000);
   const streak = usePoll(open && on("listening") ? "/streaks" : null, 600000);
   const steamD = usePoll(open && on("steam") ? "/steam" : null, 60000);
+  const otd = usePoll(open && on("onthisday") ? "/onthisday" : null, 3600000);
 
   const plug = usePlugins();
   const pSecs = pluginSections(plug); // [id, title, plugin, section]
@@ -182,6 +183,8 @@ export default function Notch() {
   const lastAlert = useRef(0);
   const [netAlert, setNetAlert] = useState(null); // "Back online" for a few seconds
   const [saleAlert, setSaleAlert] = useState(null);
+  const [miles, setMiles] = useState([]); // milestones reached by the song that just ended, each shown for 20 s
+  const lastMile = useRef(null);
   const wish = usePoll(o.steam_sales ? "/steam/wishlist" : null, 1800000);
   const netHigh = useRef(0), wasOnline = useRef(null);
   const wantDl = o.downloads || on("downloads"), wantBat = o.battery || on("devices"), wantNotif = o.notifs || on("notifications");
@@ -210,6 +213,11 @@ export default function Notch() {
   if (saleAlert && saleAlert.until > ms) {
     pcActs.push({ id: "sale", icon: <Icon d="controller" />, tone: "#66c0f4", label: `${saleAlert.name} is ${saleAlert.discount}% off`,
       value: saleAlert.price || `-${saleAlert.discount}%`, short: `-${saleAlert.discount}%` });
+  }
+  for (const m of miles) {
+    if (m.until <= ms) continue;
+    pcActs.push({ id: "m" + m.id, icon: m.image ? <img src={m.image} draggable={false} /> : <Icon d="chart" />, tone: "#ffd60a",
+      label: m.text, value: m.sub, short: m.short });
   }
   for (const a of pAlerts) {
     if (a.until <= ms) continue;
@@ -420,6 +428,20 @@ export default function Notch() {
     } catch {}
     setSaleAlert({ ...fresh[0], until: Date.now() + 20000 });
   }, [wish]);
+  // Milestones: the first read only learns the newest id (so a restart doesn't replay old ones), then anything new shows.
+  useEffect(() => {
+    if (!o.milestones) return;
+    const load = () => !hidden && get("/milestones?after=" + (lastMile.current ?? -1)).then((list) => {
+      const first = lastMile.current == null, t = Date.now();
+      lastMile.current = Math.max(lastMile.current ?? 0, ...list.map((m) => m.id));
+      const fresh = list.filter((m) => !first || t / 1000 - m.at < 20).reverse().slice(0, 3).reverse()
+        .map((m) => ({ ...m, until: Math.min(t, m.at * 1000) + 20000 }));
+      if (fresh.length) setMiles((old) => [...old.filter((x) => x.until > t), ...fresh]);
+    }).catch(() => {});
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [o.milestones]);
   useEffect(() => {
     if (!o.alerts) return;
     const load = () => !hidden && get("/plugins/alerts?after=" + lastAlert.current).then((list) => {
@@ -579,6 +601,7 @@ export default function Notch() {
     calendar: !set?.calendars?.length ? "Add a calendar in Settings" : nextEvent ? nextEvent.title : "Nothing coming up",
     pc: pc ? `CPU ${Math.round(pc.cpu)}% · RAM ${Math.round(pc.ram)}%` : "CPU, GPU and RAM",
     listening: today ? `${today.minutes} min today` : "Minutes and streak",
+    onthisday: otd?.[0] ? `${otd[0].year}: ${otd[0].top.name}` : "Today in earlier years",
     devices: pcl?.battery?.[0] ? pcl.battery.map((b) => `${b.name} ${b.level == null ? b.text : b.level + "%"}`).join(" · ") : "Controllers, headsets, mice",
     outputs: outNow ? outName(outNow[1])[0] : "Headphones or speakers",
     mixer: pcVol ? `PC ${Math.round(pcVol[0] * 100)}%${mix?.length ? ` · ${mix.length} ${mix.length === 1 ? "app" : "apps"}` : ""}` : "PC and app volume",
@@ -769,6 +792,13 @@ export default function Notch() {
         <b className="n-tt">{today.minutes} min today</b>
         <span className="n-ts">{streak?.current > 0 ? `${streak.current}-day streak` : "No streak yet"}</span>
       </div>
+    ),
+    onthisday: otd?.length > 0 && (
+      <button key="onthisday" className="n-tile n-otd" onClick={() => invoke("open_stats", { detail: { kind: "day", id: otd[0].day } })}>
+        <div className="n-th"><Icon d="calendar" />{otd[0].ago === 1 ? "A year ago" : `${otd[0].ago} years ago`}</div>
+        <b className="n-tt">{otd[0].top.name}</b>
+        <span className="n-ts">{otd[0].top.artists} · {otd[0].minutes} min that day</span>
+      </button>
     ),
     steam: steamD?.connected && !steamD.error && (() => {
       const ingame = (steamD.friends || []).find((f) => f.game);

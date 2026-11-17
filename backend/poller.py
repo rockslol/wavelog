@@ -7,6 +7,7 @@ from datetime import datetime
 
 import httpx
 
+import milestones
 import spotify
 from db import DATA, db, read_json, save_track, ts
 
@@ -44,6 +45,10 @@ def finish(s, ended):
             (t["id"], ts(end), int(ms), s["context"]),
         )
     log.info("Played %s (%ss)", t["name"], int(ms / 1000))
+    try:
+        milestones.check(t, ms)
+    except Exception:
+        log.exception("Milestones failed")
 
 
 async def poll_current():

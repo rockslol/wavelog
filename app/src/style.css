@@ -1187,6 +1187,9 @@ input[type="range"] {
   stroke: #fff;
   stroke-width: 1.5;
 }
+.heat rect.pick {
+  cursor: pointer;
+}
 .legend {
   display: flex;
   justify-content: flex-end;
@@ -1531,6 +1534,28 @@ input[type="range"] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.otd .sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.otd .ago {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+.day-nav {
+  display: flex;
+  gap: 8px;
+}
+.day-log .rank {
+  width: 40px;
+}
+.day-log li + li {
+  margin-top: 2px;
+}
+.day-more {
+  margin-top: 10px;
 }
 
 .karaoke {
@@ -2890,6 +2915,9 @@ kbd {
 }
 .n-cal .n-th { color: #ff6961; }
 .n-today .n-th { color: #1ed760; }
+.n-otd .n-th { color: #ffd60a; }
+button.n-otd { border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.n-otd:hover { background: rgba(255, 255, 255, 0.11); }
 .n-timer .n-th { color: #ff9f0a; }
 .n-timer.break .n-th { color: #30d158; }
 .n-tb {
